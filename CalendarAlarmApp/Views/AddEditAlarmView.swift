@@ -96,50 +96,69 @@ struct AddEditAlarmView: View {
     // MARK: - Settings List (Following AlarmKit countdown pattern)
 
     private var settingsList: some View {
-        List {
-            // Title Section
-            Section {
+        VStack(spacing: 0) {
+            // Single Compact Settings Card
+            VStack(spacing: 0) {
+                // Title Row
                 HStack {
                     Text("Title")
                         .foregroundColor(.white)
+                        .font(.system(size: 16))
                     Spacer()
                     TextField("Title", text: $title)
                         .multilineTextAlignment(.trailing)
                         .foregroundColor(.gray)
+                        .font(.system(size: 16))
                 }
-            }
-            .listRowBackground(Color.gray.opacity(0.1))
-
-            // Sound Section
-            Section {
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                
+                Divider()
+                    .background(Color.gray.opacity(0.3))
+                
+                // Sound Row
                 Button(action: {
                     showingSoundPicker = true
                 }) {
                     HStack {
                         Text("Sound")
                             .foregroundColor(.white)
+                            .font(.system(size: 16))
                         Spacer()
                         Text(soundName)
                             .foregroundColor(.gray)
+                            .font(.system(size: 16))
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(.gray)
+                            .font(.system(size: 14))
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
-            }
-            .listRowBackground(Color.gray.opacity(0.1))
-
-            // Snooze Section
-            Section {
-                Toggle("Snooze", isOn: $snoozeEnabled)
-                    .foregroundColor(.white)
-                    .toggleStyle(SwitchToggleStyle(tint: .orange))
-            }
-            .listRowBackground(Color.gray.opacity(0.1))
-
-            // Alert Settings Section (Compact 2-row layout)
-            Section(header: Text("Alert Settings").foregroundColor(.gray)) {
+                
+                Divider()
+                    .background(Color.gray.opacity(0.3))
+                
+                // Snooze Row
+                HStack {
+                    Text("Snooze")
+                        .foregroundColor(.white)
+                        .font(.system(size: 16))
+                    Spacer()
+                    Toggle("", isOn: $snoozeEnabled)
+                        .toggleStyle(SwitchToggleStyle(tint: .orange))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                
+                Divider()
+                    .background(Color.gray.opacity(0.3))
+                
                 // Pre-Alert Row
                 HStack {
                     Text("Pre-Alert")
                         .foregroundColor(.white)
+                        .font(.system(size: 16))
                     Spacer()
                     Picker("", selection: $preAlertMinutes) {
                         ForEach([5, 10, 15, 30], id: \.self) { minutes in
@@ -148,11 +167,17 @@ struct AddEditAlarmView: View {
                     }
                     .pickerStyle(MenuPickerStyle())
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                
+                Divider()
+                    .background(Color.gray.opacity(0.3))
                 
                 // Alert Duration Row
                 HStack {
                     Text("Duration")
                         .foregroundColor(.white)
+                        .font(.system(size: 16))
                     Spacer()
                     Picker("", selection: $postAlertMinutes) {
                         ForEach([1, 5, 10, 15], id: \.self) { minutes in
@@ -161,11 +186,13 @@ struct AddEditAlarmView: View {
                     }
                     .pickerStyle(MenuPickerStyle())
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .listRowBackground(Color.gray.opacity(0.1))
+            .background(Color.gray.opacity(0.1))
+            .cornerRadius(12)
+            .padding(.horizontal)
         }
-        .listStyle(InsetGroupedListStyle())
-        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Actions
