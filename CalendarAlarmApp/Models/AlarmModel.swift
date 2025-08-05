@@ -11,30 +11,30 @@ import Combine
 import Foundation
 import SwiftUI
 
-// MARK: - Alarm Data Model (Following AlarmKit countdown pattern exactly)
+// MARK: - Alarm Data Model (Using AlarmKit schedule-based alarms for future dates)
 
 struct AlarmData: Identifiable, Codable {
     let id: UUID
     var title: String
     var isEnabled: Bool
-    var countdownMinutes: Int // Total countdown duration in minutes
+    var alarmDate: Date // Specific date and time for the alarm
     var soundName: String
     var snoozeEnabled: Bool
     var preAlertMinutes: Int // Minutes before final alert (like 10 min warning)
     var postAlertMinutes: Int // Minutes to keep alert active after countdown ends
 
     init(id: UUID = UUID(),
-         title: String = "Timer Alarm",
+         title: String = "Alarm",
          isEnabled: Bool = true,
-         countdownMinutes: Int = 60, // Default 1 hour countdown
+         alarmDate: Date = Date().addingTimeInterval(3600), // Default 1 hour from now
          soundName: String = "Chime",
          snoozeEnabled: Bool = true,
-         preAlertMinutes: Int = 10, // 10 min warning before countdown ends
-         postAlertMinutes: Int = 5) { // 5 min alert duration after countdown ends
+         preAlertMinutes: Int = 10, // 10 min warning before alarm
+         postAlertMinutes: Int = 5) { // 5 min alert duration after alarm fires
         self.id = id
         self.title = title
         self.isEnabled = isEnabled
-        self.countdownMinutes = countdownMinutes
+        self.alarmDate = alarmDate
         self.soundName = soundName
         self.snoozeEnabled = snoozeEnabled
         self.preAlertMinutes = preAlertMinutes
@@ -42,22 +42,23 @@ struct AlarmData: Identifiable, Codable {
     }
 
     var durationString: String {
-        if countdownMinutes < 60 {
-            return "\(countdownMinutes) min"
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        
+        // If alarm is today, show just time
+        if Calendar.current.isDate(alarmDate, inSameDayAs: Date()) {
+            return formatter.string(from: alarmDate)
         } else {
-            let hours = countdownMinutes / 60
-            let minutes = countdownMinutes % 60
-            if minutes == 0 {
-                return "\(hours)h"
-            } else {
-                return "\(hours)h \(minutes)m"
-            }
+            // If alarm is future date, show date + time
+            formatter.dateStyle = .short
+            return formatter.string(from: alarmDate)
         }
     }
 
-    // Calculate countdown duration for AlarmKit (following docs exactly)
-    var alarmKitCountdownDuration: TimeInterval {
-        TimeInterval(countdownMinutes * 60)
+    // Check if alarm is in the past
+    var isPastDue: Bool {
+        alarmDate < Date()
     }
 }
 
@@ -269,9 +270,12 @@ class AlarmStore: ObservableObject {
             // Create sound configuration (following official Apple docs)
             // Note: Sound will be configured in AlarmConfiguration.init
 
-            // Create alarm configuration with countdown duration (following official Apple AlarmKit docs)
-            let alarmConfiguration = AlarmManager.AlarmConfiguration.timer(
-                duration: alarm.alarmKitCountdownDuration,
+            // Create schedule for specific future time (using AlarmKit schedule-based approach)
+            let schedule = Alarm.Schedule.fixed(alarm.alarmDate)
+            
+            // Create alarm configuration with fixed schedule (following official Apple AlarmKit docs)
+            let alarmConfiguration = AlarmManager.AlarmConfiguration.alarm(
+                schedule: schedule,
                 attributes: attributes,
                 stopIntent: nil, // Optional app intent for stop action
                 secondaryIntent: nil, // Optional app intent for secondary action  
@@ -280,11 +284,11 @@ class AlarmStore: ObservableObject {
 
             _ = try await AlarmManager.shared.schedule(id: alarm.id, configuration: alarmConfiguration)
 
-            print("✅ Scheduled AlarmKit countdown: '\(alarm.title)' - \(alarm.durationString)")
+            print("✅ Scheduled AlarmKit alarm: '\(alarm.title)' - \(alarm.durationString)")
             print("🎯 AlarmKit will handle Live Activities automatically")
 
         } catch {
-            print("❌ Failed to schedule AlarmKit countdown: \(error)")
+            print("❌ Failed to schedule AlarmKit alarm: \(error)")
         }
     }
 

@@ -28,7 +28,7 @@ struct MainAlarmView: View {
                     }
                 }
             }
-            .navigationTitle("Timer Alarms")
+            .navigationTitle("Alarms")
             .navigationBarTitleDisplayMode(.large)
             .preferredColorScheme(.dark)
             .toolbar {
@@ -68,12 +68,12 @@ struct MainAlarmView: View {
                 .font(.system(size: 80))
                 .foregroundColor(.gray)
 
-            Text("No Timer Alarms")
+            Text("No Alarms")
                 .font(.title2)
                 .fontWeight(.medium)
                 .foregroundColor(.white)
 
-            Text("Add a countdown timer alarm to get started")
+            Text("Add an alarm to get started")
                 .font(.body)
                 .foregroundColor(.gray)
 
@@ -122,7 +122,7 @@ struct AlarmRowView: View {
 
     var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 10) {
                 // Duration display (following AlarmKit countdown pattern)
                 Text(alarm.durationString)
                     .font(.system(size: 50, weight: .thin, design: .default))
@@ -137,7 +137,7 @@ struct AlarmRowView: View {
                     Text("•")
                         .foregroundColor(.gray)
 
-                    Text("Countdown Timer")
+                    Text("Alarm")
                         .font(.body)
                         .foregroundColor(.gray)
                 }
@@ -152,7 +152,7 @@ struct AlarmRowView: View {
             ))
             .toggleStyle(SwitchToggleStyle(tint: .orange))
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 16)
         .contentShape(Rectangle())
         .onTapGesture {
             onEdit()

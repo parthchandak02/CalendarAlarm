@@ -14,9 +14,9 @@ struct AddEditAlarmView: View {
     // Editing state
     let editingAlarm: AlarmData?
 
-    // Form state (following AlarmKit countdown pattern)
+    // Form state (using AlarmKit schedule pattern for future dates)
     @State private var title = "Title"
-    @State private var countdownMinutes = 60
+    @State private var alarmDate = Date().addingTimeInterval(60) // Default to 1 minute from now for fast testing
     @State private var preAlertMinutes = 10
     @State private var postAlertMinutes = 5
     @State private var soundName = "Chime"
@@ -31,7 +31,7 @@ struct AddEditAlarmView: View {
 
         if let alarm = editingAlarm {
             _title = State(initialValue: alarm.title)
-            _countdownMinutes = State(initialValue: alarm.countdownMinutes)
+            _alarmDate = State(initialValue: alarm.alarmDate)
             _preAlertMinutes = State(initialValue: alarm.preAlertMinutes)
             _postAlertMinutes = State(initialValue: alarm.postAlertMinutes)
             _soundName = State(initialValue: alarm.soundName)
@@ -46,8 +46,8 @@ struct AddEditAlarmView: View {
                     .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    // Countdown Duration Picker
-                    countdownPickerSection
+                    // Alarm Time Picker
+                    alarmTimePickerSection
 
                     // Settings List
                     settingsList
@@ -77,47 +77,17 @@ struct AddEditAlarmView: View {
         }
     }
 
-    // MARK: - Countdown Duration Picker Section
+    // MARK: - Alarm Time Picker Section
 
-    private var countdownPickerSection: some View {
+    private var alarmTimePickerSection: some View {
         VStack(spacing: 20) {
-            Text("Countdown Duration")
+            Text("Alarm Time")
                 .font(.headline)
                 .foregroundColor(.white)
 
-            HStack {
-                // Hours picker
-                Picker("Hours", selection: Binding(
-                    get: { countdownMinutes / 60 },
-                    set: { countdownMinutes = $0 * 60 + (countdownMinutes % 60) }
-                )) {
-                    ForEach(0 ..< 24) { hour in
-                        Text("\(hour)").tag(hour)
-                    }
-                }
-                .pickerStyle(WheelPickerStyle())
-                .frame(width: 80)
-                .clipped()
-
-                Text("h")
-                    .foregroundColor(.white)
-
-                // Minutes picker
-                Picker("Minutes", selection: Binding(
-                    get: { countdownMinutes % 60 },
-                    set: { countdownMinutes = (countdownMinutes / 60) * 60 + $0 }
-                )) {
-                    ForEach(0 ..< 60) { minute in
-                        Text("\(minute)").tag(minute)
-                    }
-                }
-                .pickerStyle(WheelPickerStyle())
-                .frame(width: 80)
-                .clipped()
-
-                Text("m")
-                    .foregroundColor(.white)
-            }
+            DatePicker("Select alarm time", selection: $alarmDate, in: Date()..., displayedComponents: [.date, .hourAndMinute])
+                .datePickerStyle(.graphical) // Calendar-style with today highlighted
+                .colorScheme(.dark)
         }
         .padding()
         .background(Color.gray.opacity(0.1))
@@ -204,7 +174,7 @@ struct AddEditAlarmView: View {
         let alarm = AlarmData(
             title: title.isEmpty ? "Title" : title,
             isEnabled: true,
-            countdownMinutes: max(1, countdownMinutes), // Ensure at least 1 minute
+            alarmDate: alarmDate,
             soundName: soundName,
             snoozeEnabled: snoozeEnabled,
             preAlertMinutes: preAlertMinutes,
@@ -217,7 +187,7 @@ struct AddEditAlarmView: View {
             updatedAlarm = AlarmData(
                 title: title.isEmpty ? "Title" : title,
                 isEnabled: editingAlarm.isEnabled,
-                countdownMinutes: max(1, countdownMinutes),
+                alarmDate: alarmDate,
                 soundName: soundName,
                 snoozeEnabled: snoozeEnabled,
                 preAlertMinutes: preAlertMinutes,
