@@ -112,8 +112,12 @@ extension EmptyAlarmMetadata: @preconcurrency AlarmMetadata {}
 // Use empty metadata to avoid iOS 26 beta protocol conformance issues
 typealias AlarmAppMetadata = EmptyAlarmMetadata
 
-// MARK: - ActivityKit Live Activities Support (iOS 26)
-// ActivityAttributes for Live Activities integration following successful examples
+// MARK: - AlarmKit Live Activities (iOS 26)
+// AlarmKit handles Live Activities automatically - no manual ActivityAttributes needed
+// Manual ActivityKit integration commented out to prevent conflicts with AlarmKit system Live Activities
+
+/*
+// Legacy manual ActivityKit code - replaced by AlarmKit automatic Live Activities
 struct AlarmCountdownAttributes: ActivityAttributes {
     public typealias AlarmCountdownStatus = ContentState
 
@@ -126,6 +130,7 @@ struct AlarmCountdownAttributes: ActivityAttributes {
     var alarmId: String
     var originalDuration: Int // Duration in minutes
 }
+*/
 
 // MARK: - Alarm Store Manager
 
@@ -276,9 +281,7 @@ class AlarmStore: ObservableObject {
             _ = try await AlarmManager.shared.schedule(id: alarm.id, configuration: alarmConfiguration)
 
             print("✅ Scheduled AlarmKit countdown: '\(alarm.title)' - \(alarm.durationString)")
-            
-            // START LIVE ACTIVITY for countdown (following successful examples)
-            await startLiveActivity(for: alarm)
+            print("🎯 AlarmKit will handle Live Activities automatically")
 
         } catch {
             print("❌ Failed to schedule AlarmKit countdown: \(error)")
@@ -301,36 +304,7 @@ class AlarmStore: ObservableObject {
         }
     }
     
-    // MARK: - Live Activity Management (ActivityKit)
-    // Following successful examples from web search
-    
-    private func startLiveActivity(for alarm: AlarmData) async {
-        do {
-            // Create countdown attributes (following web examples pattern)
-            let attributes = AlarmCountdownAttributes(
-                alarmId: alarm.id.uuidString,
-                originalDuration: alarm.countdownMinutes
-            )
-            
-            // Create initial content state with countdown time range
-            let endTime = Date().addingTimeInterval(TimeInterval(alarm.countdownMinutes * 60))
-            let contentState = AlarmCountdownAttributes.ContentState(
-                alarmTitle: alarm.title,
-                remainingTime: Date()...endTime,
-                isPaused: false
-            )
-            
-            // Request Live Activity (following ActivityKit examples)
-            let activity = try Activity<AlarmCountdownAttributes>.request(
-                attributes: attributes,
-                contentState: contentState,
-                pushType: nil
-            )
-            
-            print("🎯 Started Live Activity for alarm: \(activity.id)")
-            
-        } catch {
-            print("❌ Failed to start Live Activity: \(error)")
-        }
-    }
+    // MARK: - Live Activity Management (AlarmKit)
+    // AlarmKit in iOS 26 handles Live Activities automatically when scheduling alarms
+    // Manual ActivityKit integration removed to prevent conflicts with system Live Activities
 }

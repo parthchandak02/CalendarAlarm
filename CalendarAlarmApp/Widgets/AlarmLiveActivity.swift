@@ -5,6 +5,11 @@
 //  Created by Parth Chandak on 8/4/25.
 //
 
+// AlarmKit handles Live Activities automatically in iOS 26
+// Manual ActivityKit Live Activity widget commented out to prevent conflicts
+// with AlarmKit's built-in Live Activity management
+
+/*
 import ActivityKit
 import AlarmKit
 import SwiftUI
@@ -230,3 +235,4 @@ struct AlarmLiveActivity: Widget {
             .foregroundColor(.orange)
     }
 }
+*/

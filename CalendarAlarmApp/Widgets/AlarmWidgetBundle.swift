@@ -5,6 +5,10 @@
 //  Created by Parth Chandak on 8/4/25.
 //
 
+// AlarmKit handles Live Activities automatically in iOS 26
+// Manual Widget Bundle commented out since AlarmKit manages Live Activities
+
+/*
 import SwiftUI
 import WidgetKit
 
@@ -16,3 +20,4 @@ struct AlarmWidgetBundle: WidgetBundle {
         AlarmLiveActivity()
     }
 }
+*/

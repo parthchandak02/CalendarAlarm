@@ -131,3 +131,5 @@ fastlane/*.env
 
 ## Xcode Cloud
 .xcode-cloud
+
+.tasks.md

@@ -15,7 +15,7 @@ struct AddEditAlarmView: View {
     let editingAlarm: AlarmData?
 
     // Form state (following AlarmKit countdown pattern)
-    @State private var title = "Timer Alarm"
+    @State private var title = "Title"
     @State private var countdownMinutes = 60
     @State private var preAlertMinutes = 10
     @State private var postAlertMinutes = 5
@@ -133,50 +133,10 @@ struct AddEditAlarmView: View {
                     Text("Title")
                         .foregroundColor(.white)
                     Spacer()
-                    TextField("Timer Alarm", text: $title)
+                    TextField("Title", text: $title)
                         .multilineTextAlignment(.trailing)
                         .foregroundColor(.gray)
                 }
-            }
-            .listRowBackground(Color.gray.opacity(0.1))
-
-            // Pre-Alert Section (Warning before countdown ends)
-            Section(header: Text("Alert Settings").foregroundColor(.gray)) {
-                HStack {
-                    Text("Pre-Alert")
-                        .foregroundColor(.white)
-                    Spacer()
-                    Picker("Pre-Alert Minutes", selection: $preAlertMinutes) {
-                        ForEach([5, 10, 15, 30], id: \.self) { minutes in
-                            Text("\(minutes) min").tag(minutes)
-                        }
-                    }
-                    .pickerStyle(MenuPickerStyle())
-                }
-
-                Text("Warning \(preAlertMinutes) minutes before countdown ends")
-                    .font(.caption)
-                    .foregroundColor(.gray)
-            }
-            .listRowBackground(Color.gray.opacity(0.1))
-
-            // Post-Alert Section (How long alert stays active)
-            Section {
-                HStack {
-                    Text("Alert Duration")
-                        .foregroundColor(.white)
-                    Spacer()
-                    Picker("Post-Alert Minutes", selection: $postAlertMinutes) {
-                        ForEach([1, 5, 10, 15], id: \.self) { minutes in
-                            Text("\(minutes) min").tag(minutes)
-                        }
-                    }
-                    .pickerStyle(MenuPickerStyle())
-                }
-
-                Text("Keep alert active for \(postAlertMinutes) minutes")
-                    .font(.caption)
-                    .foregroundColor(.gray)
             }
             .listRowBackground(Color.gray.opacity(0.1))
 
@@ -196,15 +156,41 @@ struct AddEditAlarmView: View {
             }
             .listRowBackground(Color.gray.opacity(0.1))
 
-            // Repeat/Snooze Section
+            // Snooze Section
             Section {
-                Toggle("Repeat Option", isOn: $snoozeEnabled)
+                Toggle("Snooze", isOn: $snoozeEnabled)
                     .foregroundColor(.white)
                     .toggleStyle(SwitchToggleStyle(tint: .orange))
+            }
+            .listRowBackground(Color.gray.opacity(0.1))
 
-                Text("Allow repeating the countdown when it ends")
-                    .font(.caption)
-                    .foregroundColor(.gray)
+            // Alert Settings Section (Compact 2-row layout)
+            Section(header: Text("Alert Settings").foregroundColor(.gray)) {
+                // Pre-Alert Row
+                HStack {
+                    Text("Pre-Alert")
+                        .foregroundColor(.white)
+                    Spacer()
+                    Picker("", selection: $preAlertMinutes) {
+                        ForEach([5, 10, 15, 30], id: \.self) { minutes in
+                            Text("\(minutes) min").tag(minutes)
+                        }
+                    }
+                    .pickerStyle(MenuPickerStyle())
+                }
+                
+                // Alert Duration Row
+                HStack {
+                    Text("Duration")
+                        .foregroundColor(.white)
+                    Spacer()
+                    Picker("", selection: $postAlertMinutes) {
+                        ForEach([1, 5, 10, 15], id: \.self) { minutes in
+                            Text("\(minutes) min").tag(minutes)
+                        }
+                    }
+                    .pickerStyle(MenuPickerStyle())
+                }
             }
             .listRowBackground(Color.gray.opacity(0.1))
         }
@@ -216,7 +202,7 @@ struct AddEditAlarmView: View {
 
     private func saveAlarm() {
         let alarm = AlarmData(
-            title: title.isEmpty ? "Timer Alarm" : title,
+            title: title.isEmpty ? "Title" : title,
             isEnabled: true,
             countdownMinutes: max(1, countdownMinutes), // Ensure at least 1 minute
             soundName: soundName,
@@ -229,7 +215,7 @@ struct AddEditAlarmView: View {
             var updatedAlarm = alarm
             // Preserve the existing enabled state and ID
             updatedAlarm = AlarmData(
-                title: title.isEmpty ? "Timer Alarm" : title,
+                title: title.isEmpty ? "Title" : title,
                 isEnabled: editingAlarm.isEnabled,
                 countdownMinutes: max(1, countdownMinutes),
                 soundName: soundName,

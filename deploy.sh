@@ -1,374 +1,327 @@
 #!/bin/bash
 
-# CalendarAlarmApp - Deploy to iPhone 16 Pro Script
-# This script builds and deploys the app to iOS 26.0 devices and simulators
+# CalendarAlarmApp - Clean iOS 26 Deployment Script
+# Uses deploy-lib.sh for clean logging and utilities
 
 set -e  # Exit on any error
 
-# Verbose mode (set to false for quieter output)
-VERBOSE=${VERBOSE:-false}
-if [ "$VERBOSE" = "true" ]; then
-    set -x  # Enable verbose mode - show all commands being executed
-fi
+# Load our utility library
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/deploy-lib.sh"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-NC='\033[0m' # No Color
-
-# App configuration
-APP_NAME="CalendarAlarmApp"
+# Configuration
 PROJECT_NAME="CalendarAlarmApp.xcodeproj"
 SCHEME="CalendarAlarmApp"
 CONFIGURATION="Debug"
 DERIVED_DATA_PATH="./DerivedData"
+APP_NAME="CalendarAlarmApp"
 
-echo -e "${BLUE}📱 CalendarAlarmApp - iOS 26 AlarmKit Deployment Script${NC}"
-echo "======================================================"
-echo -e "${GREEN}🔊 VERBOSE MODE ENABLED - Detailed output for debugging${NC}"
-echo ""
+# Verbose mode (set VERBOSE=true for detailed output)
+VERBOSE=${VERBOSE:-false}
 
-# Check if we're in the right directory
-if [ ! -f "$PROJECT_NAME/project.pbxproj" ]; then
-    echo -e "${RED}❌ Error: $PROJECT_NAME not found in current directory${NC}"
-    echo "Please run this script from the CalendarAlarmApp root directory"
+echo_title "📱 CalendarAlarmApp - iOS 26 AlarmKit Deployment"
+
+# Parse command line arguments
+DEPLOYMENT_TARGET=""
+MONITOR_MODE=""
+
+if [ $# -eq 1 ]; then
+    case "$1" in
+        "1")
+            DEPLOYMENT_TARGET="simulator"
+            log_info "🎯 Target: iOS Simulator (argument: 1)"
+            ;;
+        "2")
+            DEPLOYMENT_TARGET="device"
+            log_info "🎯 Target: Physical Device (argument: 2)"
+            ;;
+        "monitor"|"m")
+            MONITOR_MODE="live"
+            ;;
+        "status"|"s")
+            MONITOR_MODE="status"
+            ;;
+        *)
+            log_error "Invalid argument: $1"
+            echo
+            echo "Usage:"
+            echo "  ./deploy.sh 1        Deploy to iOS Simulator"
+            echo "  ./deploy.sh 2        Deploy to Physical Device"
+            echo "  ./deploy.sh monitor  Monitor Live Activities (15 sec)"
+            echo "  ./deploy.sh m        Monitor Live Activities (short)"
+            echo "  ./deploy.sh status   Check Live Activity status"
+            echo "  ./deploy.sh s        Check Live Activity status (short)"
+            echo "  ./deploy.sh          Auto-detect (legacy mode)"
+            exit 1
+            ;;
+    esac
+elif [ $# -eq 2 ]; then
+    case "$1" in
+        "monitor"|"m")
+            MONITOR_MODE="live"
+            # Second argument is duration
+            if [[ "$2" =~ ^[0-9]+$ ]]; then
+                MONITOR_DURATION="$2"
+            else
+                log_error "Invalid duration: $2 (must be number of seconds)"
+                exit 1
+            fi
+            ;;
+        *)
+            log_error "Invalid arguments: $1 $2"
+            echo
+            echo "Usage:"
+            echo "  ./deploy.sh monitor 30   Monitor Live Activities for 30 seconds"
+            echo "  ./deploy.sh m 30         Monitor Live Activities for 30 seconds"
+            exit 1
+            ;;
+    esac
+elif [ $# -gt 2 ]; then
+    log_error "Too many arguments"
+    echo
+    echo "Usage:"
+    echo "  ./deploy.sh 1        Deploy to iOS Simulator"
+    echo "  ./deploy.sh 2        Deploy to Physical Device"
+    echo "  ./deploy.sh monitor  Monitor Live Activities (15 sec)"
+    echo "  ./deploy.sh status   Check Live Activity status"
+    echo "  ./deploy.sh          Auto-detect (legacy mode)"
     exit 1
-fi
-
-# Clean any previous builds
-echo -e "${YELLOW}🧹 Cleaning previous builds...${NC}"
-rm -rf "$DERIVED_DATA_PATH"
-echo -e "${BLUE}ℹ️  Skipping xcodebuild clean to avoid hanging - using fresh DerivedData instead${NC}"
-
-# Function to list and detect iOS 26 targets
-detect_ios26_targets() {
-    echo -e "${BLUE}📋 Scanning for iOS 26.0 targets...${NC}"
-    echo ""
-    
-    # Check simulators first (preferred for AlarmKit testing)
-    echo -e "${PURPLE}🔍 iOS 26.0 Simulators:${NC}"
-    echo "Running: xcrun simctl list devices available | grep 'iOS 26.0' | grep 'iPhone 16'"
-    SIMULATORS=$(xcrun simctl list devices available | grep "iOS 26.0" | grep "iPhone 16" || echo "")
-    
-    if [ -n "$SIMULATORS" ]; then
-        echo "$SIMULATORS"
-        echo ""
-        
-        # Try to find booted iPhone 16 Pro iOS 26 simulator
-        BOOTED_SIM=$(echo "$SIMULATORS" | grep "iPhone 16 Pro" | grep "Booted" | head -n1 || echo "")
-        if [ -n "$BOOTED_SIM" ]; then
-            SIM_ID=$(echo "$BOOTED_SIM" | sed -n 's/.*(\([^)]*\)) (Booted).*/\1/p')
-            echo -e "${GREEN}✅ Found booted iPhone 16 Pro (iOS 26.0) simulator: $SIM_ID${NC}"
-            DEVICE_ID="$SIM_ID"
-            DEVICE_TYPE="simulator"
-            DEVICE_NAME="iPhone 16 Pro Simulator (iOS 26.0)"
-            return 0
-        fi
-        
-        # Try any iPhone 16 Pro iOS 26 simulator
-        AVAILABLE_SIM=$(echo "$SIMULATORS" | grep "iPhone 16 Pro" | head -n1 || echo "")
-        if [ -n "$AVAILABLE_SIM" ]; then
-            SIM_ID=$(echo "$AVAILABLE_SIM" | sed -n 's/.*(\([^)]*\)) (Shutdown).*/\1/p')
-            echo -e "${YELLOW}⚡ Found iPhone 16 Pro (iOS 26.0) simulator (will boot): $SIM_ID${NC}"
-            DEVICE_ID="$SIM_ID"
-            DEVICE_TYPE="simulator"
-            DEVICE_NAME="iPhone 16 Pro Simulator (iOS 26.0)"
-            return 0
-        fi
-    else
-        echo "  No iOS 26.0 iPhone simulators found"
-    fi
-    
-    echo ""
-    echo -e "${PURPLE}🔍 Physical Devices:${NC}"
-    echo "Running: xcrun devicectl list devices"
-    
-    # Check physical devices
-    DEVICE_LIST=$(xcrun devicectl list devices 2>/dev/null || echo "")
-    
-    if [ -n "$DEVICE_LIST" ]; then
-        echo "$DEVICE_LIST"
-        echo ""
-        
-        # Try to find iPhone 16 Pro with iOS 26
-        IPHONE_16_PRO_ID=$(echo "$DEVICE_LIST" | grep -i "iPhone 16" | grep -i "available" | head -n1 | awk '{print $NF}' | tr -d '()' || echo "")
-        
-        if [ -n "$IPHONE_16_PRO_ID" ]; then
-            echo -e "${GREEN}✅ Found iPhone 16 Pro physical device: $IPHONE_16_PRO_ID${NC}"
-            DEVICE_ID="$IPHONE_16_PRO_ID"
-            DEVICE_TYPE="device"
-            DEVICE_NAME="iPhone 16 Pro Physical Device"
-            return 0
-        fi
-    else
-        echo "  No physical devices found"
-    fi
-    
-    return 1
-}
-
-# Detect target device
-if ! detect_ios26_targets; then
-    echo -e "${RED}❌ No suitable iOS 26.0 iPhone 16 Pro targets found${NC}"
-    echo ""
-    echo "To fix this:"
-    echo "  📲 For physical device: Connect iPhone 16 Pro and trust this computer"
-    echo "  📱 For simulator: Create iPhone 16 Pro iOS 26.0 simulator in Xcode"
-    exit 1
-fi
-
-echo ""
-
-# Boot simulator if needed
-if [ "$DEVICE_TYPE" = "simulator" ]; then
-    echo -e "${BLUE}🚀 Ensuring simulator is booted...${NC}"
-    echo "Running: xcrun simctl boot '$DEVICE_ID'"
-    xcrun simctl boot "$DEVICE_ID" 2>/dev/null || echo "Simulator already booted"
-    sleep 2
-    
-    echo -e "${BLUE}📱 Checking simulator status...${NC}"
-    xcrun simctl list devices | grep "$DEVICE_ID" || echo "Simulator not found in device list"
-fi
-
-# Build the app
-echo -e "${BLUE}🔨 Building $APP_NAME for iOS 26.0...${NC}"
-echo "Target: $DEVICE_NAME"
-echo "Configuration: $CONFIGURATION"
-echo "Device ID: $DEVICE_ID"
-echo ""
-
-if [ "$DEVICE_TYPE" = "simulator" ]; then
-    DESTINATION="platform=iOS Simulator,id=$DEVICE_ID"
 else
-    DESTINATION="id=$DEVICE_ID"
+    log_info "🔍 Auto-detection mode (no arguments provided)"
 fi
 
-# Add domain blocking functions to prevent xcodebuild hanging
-block_apple_domain() {
-    echo -e "${YELLOW}🚫 Temporarily blocking developerservices2.apple.com to prevent hanging...${NC}"
-    echo "127.0.0.1 developerservices2.apple.com" | sudo tee -a /etc/hosts > /dev/null
-    echo "Domain blocked"
+# Handle monitoring modes
+if [ -n "$MONITOR_MODE" ]; then
+    case "$MONITOR_MODE" in
+        "live")
+            monitor_live_activities "${MONITOR_DURATION:-15}"
+            ;;
+        "status")
+            check_activity_status
+            ;;
+    esac
+    exit 0
+fi
+
+# Validate environment
+check_file "$PROJECT_NAME/project.pbxproj" || {
+    log_error "$PROJECT_NAME not found in current directory"
+    exit 1
 }
 
-unblock_apple_domain() {
-    echo -e "${YELLOW}🔓 Restoring access to developerservices2.apple.com...${NC}"
-    sudo sed -i '' '/developerservices2\.apple\.com/d' /etc/hosts
-    echo "Domain unblocked"
-}
+# Detect iOS 26 targets
+echo_section "📋 Scanning for iOS 26.0 targets"
 
-# Add timeout wrapper function for macOS
-run_with_timeout() {
-    local timeout_duration=$1
-    shift
-    
-    # Check if gtimeout is available (from coreutils)
-    if command -v gtimeout &> /dev/null; then
-        gtimeout "$timeout_duration" "$@"
-        return $?
-    # Check if timeout is available (Linux systems)
-    elif command -v timeout &> /dev/null; then
-        timeout "$timeout_duration" "$@"
-        return $?
+# Device selection based on argument or auto-detection
+if [ "$DEPLOYMENT_TARGET" = "simulator" ] || [ -z "$DEPLOYMENT_TARGET" ]; then
+    # Check simulators first (or force simulator with argument 1)
+    SIMULATORS=$(xcrun simctl list devices available | grep "iOS 26.0" | grep "iPhone 16" || echo "")
+    if [ -n "$SIMULATORS" ]; then
+        if [ "$DEPLOYMENT_TARGET" = "simulator" ]; then
+            log_info "🎯 Forced target: iOS 26.0 Simulators"
+        else
+            log_info "Available iOS 26.0 Simulators:"
+        fi
+        echo "$SIMULATORS"
+        
+        # Auto-select first booted simulator or first available
+        DEVICE_ID=$(echo "$SIMULATORS" | grep "(Booted)" | head -n1 | grep -o '[A-F0-9-]\{36\}' || \
+                    echo "$SIMULATORS" | head -n1 | grep -o '[A-F0-9-]\{36\}')
+        DEVICE_TYPE="simulator"
+        DESTINATION="platform=iOS Simulator,id=$DEVICE_ID"
+        
+        if echo "$SIMULATORS" | grep -q "(Booted)"; then
+            log_success "Using booted simulator: $DEVICE_ID"
+        else
+            log_info "Using available simulator: $DEVICE_ID"
+        fi
+    elif [ "$DEPLOYMENT_TARGET" = "simulator" ]; then
+        log_error "No iOS 26.0 iPhone simulators found (forced simulator mode)"
+        exit 1
     else
-        # Fallback: run without timeout but warn user
-        echo -e "${YELLOW}⚠️  No timeout command available - running without timeout protection${NC}"
-        "$@"
-        return $?
+        log_warning "No iOS 26.0 iPhone simulators found, checking physical devices..."
+        DEPLOYMENT_TARGET="device"  # Fall back to device mode
     fi
-}
+fi
 
-# Block Apple domain to prevent hanging (known Xcode 16+ bug)
-block_apple_domain
+if [ "$DEPLOYMENT_TARGET" = "device" ] || [ -z "$DEVICE_TYPE" ]; then
+    # Check physical devices using xctrace (same IDs as xcodebuild)
+    DEVICE_LIST=$(xcrun xctrace list devices 2>/dev/null | grep -E "iPhone|iPad" | grep -v "Simulator" || echo "")
+    if [ -n "$DEVICE_LIST" ]; then
+        if [ "$DEPLOYMENT_TARGET" = "device" ]; then
+            log_info "🎯 Forced target: Physical Devices"
+        else
+            log_info "Available Physical Devices:"
+        fi
+        echo "$DEVICE_LIST"
+        
+        # Extract device ID from xctrace output (format: "Device Name (Version) (ID)")
+        DEVICE_ID=$(echo "$DEVICE_LIST" | head -n1 | grep -o '([A-F0-9-]*[A-F0-9])' | tail -n1 | sed 's/[()]//g')
+        DEVICE_TYPE="device"
+        DESTINATION="platform=iOS,id=$DEVICE_ID"
+        log_success "Using physical device: $DEVICE_ID"
+    else
+        log_error "No physical devices found"
+        if [ "$DEPLOYMENT_TARGET" = "device" ]; then
+            echo
+            log_info "Make sure your device is connected and trusted"
+        fi
+        exit 1
+    fi
+fi
 
-# Ensure domain is always unblocked on exit
-trap 'unblock_apple_domain' EXIT
-
-echo "Running: xcodebuild -project '$PROJECT_NAME' -scheme '$SCHEME' -configuration '$CONFIGURATION' -destination '$DESTINATION' -derivedDataPath '$DERIVED_DATA_PATH' -verbose build"
-echo -e "${YELLOW}⏰ Build timeout set to 5 minutes to prevent hanging${NC}"
-
-run_with_timeout 300 xcodebuild -project "$PROJECT_NAME" \
-           -scheme "$SCHEME" \
-           -configuration "$CONFIGURATION" \
-           -destination "$DESTINATION" \
-           -derivedDataPath "$DERIVED_DATA_PATH" \
-           -verbose \
-           build
-
-BUILD_EXIT_CODE=$?
-if [ $BUILD_EXIT_CODE -eq 124 ]; then
-    echo -e "${RED}❌ Build timed out after 5 minutes${NC}"
-    echo ""
-    echo "The build process hung. Common solutions:"
-    echo "  🔄 Try opening the project in Xcode first to resolve any issues"
-    echo "  🏗️  Run a manual build in Xcode to see detailed errors"
-    echo "  🧹 Clear Xcode caches: Xcode > Product > Clean Build Folder"
-    echo "  🔄 Restart Xcode and try again"
-    exit 1
-elif [ $BUILD_EXIT_CODE -ne 0 ]; then
-    echo -e "${RED}❌ Build failed with exit code $BUILD_EXIT_CODE${NC}"
-    echo ""
-    echo "Common solutions:"
-    echo "  📱 Check Xcode project settings and signing"
-    echo "  🔑 Verify Apple Developer account is active"
-    echo "  📲 For device: Ensure Developer Mode is enabled"
-    echo "  🏗️  Open project in Xcode to see detailed build errors"
+# Final validation
+if [ -z "$DEVICE_ID" ] || [ -z "$DEVICE_TYPE" ]; then
+    log_error "No suitable deployment target found"
     exit 1
 fi
 
-echo -e "${GREEN}✅ Build successful!${NC}"
-echo ""
+# Clean build
+echo_section "🧹 Cleaning previous builds"
+rm -rf "$DERIVED_DATA_PATH"
+log_success "Cleaned DerivedData"
 
-# Find the built app
-echo -e "${BLUE}🔍 Searching for built app...${NC}"
+# Build with Xcode bug workaround
+echo_section "🔨 Building $APP_NAME"
+
+# Block domains to prevent hanging (known Xcode 16+ bug fix)
+block_domain "developerservices2.apple.com"
+if [ "$DEVICE_TYPE" = "device" ]; then
+    # Additional domains that can cause hanging for physical device builds
+    block_domain "developer.apple.com"
+    block_domain "idmsa.apple.com"
+    trap 'unblock_domain "developerservices2.apple.com"; unblock_domain "developer.apple.com"; unblock_domain "idmsa.apple.com"' EXIT
+else
+    trap 'unblock_domain "developerservices2.apple.com"' EXIT
+fi
+
+# Build command with timeout and anti-hang flags
+ANTI_HANG_FLAGS="-skipPackageSignatureValidation -skipMacroValidation -disableAutomaticPackageResolution"
+
+if [ "$VERBOSE" = "true" ]; then
+    BUILD_CMD="xcodebuild -project \"$PROJECT_NAME\" -scheme \"$SCHEME\" -configuration \"$CONFIGURATION\" -destination \"$DESTINATION\" -derivedDataPath \"$DERIVED_DATA_PATH\" $ANTI_HANG_FLAGS -verbose build"
+else
+    BUILD_CMD="xcodebuild -project \"$PROJECT_NAME\" -scheme \"$SCHEME\" -configuration \"$CONFIGURATION\" -destination \"$DESTINATION\" -derivedDataPath \"$DERIVED_DATA_PATH\" $ANTI_HANG_FLAGS build"
+fi
+
+log_step "Building with 5-minute timeout protection..."
+if [ "$VERBOSE" = "true" ]; then
+    log_info "Running: $BUILD_CMD"
+fi
+
+if run_with_timeout 300 eval "$BUILD_CMD"; then
+    log_success "Build completed successfully!"
+else
+    exit_code=$?
+    if [ $exit_code -eq 124 ]; then
+        log_error "Build timed out after 5 minutes"
+        echo
+        log_info "The build process hung. Try opening the project in Xcode first to resolve any issues."
+    else
+        log_error "Build failed with exit code $exit_code"
+    fi
+    exit 1
+fi
+
+# Find built app
+echo_section "🔍 Locating built app"
 if [ "$DEVICE_TYPE" = "simulator" ]; then
     APP_PATH=$(find "$DERIVED_DATA_PATH" -name "$APP_NAME.app" -path "*iphonesimulator*" -type d | head -n1)
-    echo "Looking for simulator app at: $DERIVED_DATA_PATH/*iphonesimulator*/$APP_NAME.app"
 else
     APP_PATH=$(find "$DERIVED_DATA_PATH" -name "$APP_NAME.app" -path "*iphoneos*" -type d | head -n1)
-    echo "Looking for device app at: $DERIVED_DATA_PATH/*iphoneos*/$APP_NAME.app"
 fi
 
-if [ -z "$APP_PATH" ]; then
-    echo -e "${YELLOW}⚠️  App not found with specific path pattern, searching more broadly...${NC}"
-    APP_PATH=$(find "$DERIVED_DATA_PATH" -name "$APP_NAME.app" -type d | head -n1)
-fi
-
-if [ -z "$APP_PATH" ]; then
-    echo -e "${RED}❌ Could not find built app at $APP_NAME.app${NC}"
+check_file "$APP_PATH/Info.plist" || {
+    log_error "Built app not found in $DERIVED_DATA_PATH"
     exit 1
-fi
+}
 
-echo -e "${BLUE}📦 Found app at: $APP_PATH${NC}"
-echo ""
+log_success "Found app at: $APP_PATH"
 
-# Install and launch the app
+# Install and launch
+echo_section "📲 Installing and launching $APP_NAME"
+
 if [ "$DEVICE_TYPE" = "simulator" ]; then
-    # Simulator installation
-    echo -e "${BLUE}📲 Installing $APP_NAME on iOS 26.0 simulator...${NC}"
-    echo "Running: xcrun simctl install '$DEVICE_ID' '$APP_PATH'"
+    # Boot simulator if needed
+    log_step "Ensuring simulator is booted..."
+    xcrun simctl boot "$DEVICE_ID" 2>/dev/null || log_info "Simulator already booted"
+    sleep 2
     
-    xcrun simctl install "$DEVICE_ID" "$APP_PATH"
-    
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}❌ Simulator installation failed${NC}"
-        echo "Device ID: $DEVICE_ID"
-        echo "App Path: $APP_PATH"
+    # Install
+    [ "$VERBOSE" = "true" ] && log_info "Running: xcrun simctl install '$DEVICE_ID' '$APP_PATH'"
+    if xcrun simctl install "$DEVICE_ID" "$APP_PATH"; then
+        log_success "Installation successful!"
+    else
+        log_error "Simulator installation failed"
         exit 1
     fi
     
-    echo -e "${GREEN}✅ Installation successful!${NC}"
-    echo ""
-    
-    # Get bundle ID and launch
+    # Launch
     BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP_PATH/Info.plist" 2>/dev/null || echo "")
-    
     if [ -n "$BUNDLE_ID" ]; then
-        echo -e "${BLUE}🚀 Launching $APP_NAME on simulator...${NC}"
-        echo "Bundle ID: $BUNDLE_ID"
-        echo "Running: xcrun simctl launch '$DEVICE_ID' '$BUNDLE_ID'"
-        
-        xcrun simctl launch "$DEVICE_ID" "$BUNDLE_ID"
-        LAUNCH_EXIT_CODE=$?
-        
-        if [ $LAUNCH_EXIT_CODE -eq 0 ]; then
-            echo -e "${GREEN}✅ App launched successfully!${NC}"
+        [ "$VERBOSE" = "true" ] && log_info "Bundle ID: $BUNDLE_ID"
+        if xcrun simctl launch "$DEVICE_ID" "$BUNDLE_ID" >/dev/null 2>&1; then
+            log_success "App launched successfully!"
         else
-            echo -e "${YELLOW}⚠️  Launch command completed with exit code $LAUNCH_EXIT_CODE - check simulator${NC}"
+            log_warning "Launch completed - check simulator"
         fi
     else
-        echo -e "${YELLOW}⚠️  Could not determine bundle identifier${NC}"
-        echo "App Path: $APP_PATH"
+        log_warning "Could not determine bundle identifier"
     fi
     
 else
-    # Physical device installation
-    echo -e "${BLUE}📲 Installing $APP_NAME on physical device...${NC}"
-    echo "Running: xcrun devicectl device install app --device '$DEVICE_ID' '$APP_PATH'"
-    
-    xcrun devicectl device install app \
-        --device "$DEVICE_ID" \
-        "$APP_PATH"
-    
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}❌ Device installation failed${NC}"
-        echo "Device ID: $DEVICE_ID"
-        echo "App Path: $APP_PATH"
-        echo ""
-        echo "Common solutions:"
+    # Physical device
+    [ "$VERBOSE" = "true" ] && log_info "Running: xcrun devicectl device install app --device '$DEVICE_ID' '$APP_PATH'"
+    if xcrun devicectl device install app --device "$DEVICE_ID" "$APP_PATH"; then
+        log_success "Installation successful!"
+    else
+        log_error "Device installation failed"
+        echo
+        log_info "Common solutions:"
         echo "  📱 Ensure device is unlocked and trusted"
-        echo "  🔧 Check Developer Mode is enabled (Settings > Privacy & Security > Developer Mode)"
+        echo "  🔧 Check Developer Mode is enabled"
         echo "  🔑 Verify your Apple ID is signed in to Xcode"
-        echo "  🔄 Try manual installation through Xcode"
         exit 1
     fi
     
-    echo -e "${GREEN}✅ Installation successful!${NC}"
-    echo ""
-    
-    # Get bundle ID and launch
+    # Launch on device
     BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP_PATH/Info.plist" 2>/dev/null || echo "")
-    
     if [ -n "$BUNDLE_ID" ]; then
-        echo -e "${BLUE}🚀 Launching $APP_NAME on device...${NC}"
-        echo "Bundle ID: $BUNDLE_ID"
-        echo "Running: xcrun devicectl device process launch --device '$DEVICE_ID' '$BUNDLE_ID'"
-        
-        xcrun devicectl device process launch \
-            --device "$DEVICE_ID" \
-            "$BUNDLE_ID"
-        LAUNCH_EXIT_CODE=$?
-        
-        if [ $LAUNCH_EXIT_CODE -eq 0 ]; then
-            echo -e "${GREEN}✅ App launched successfully!${NC}"
+        [ "$VERBOSE" = "true" ] && log_info "Bundle ID: $BUNDLE_ID"
+        if xcrun devicectl device process launch --device "$DEVICE_ID" "$BUNDLE_ID" >/dev/null 2>&1; then
+            log_success "App launched successfully!"
         else
-            echo -e "${YELLOW}⚠️  Launch command completed with exit code $LAUNCH_EXIT_CODE - check your device${NC}"
+            log_warning "Launch completed - check your device"
         fi
     else
-        echo -e "${YELLOW}⚠️  Could not determine bundle identifier automatically${NC}"
-        echo "App Path: $APP_PATH"
-        echo "Please launch the app manually from your device home screen"
+        log_warning "Could not determine bundle identifier automatically"
+        log_info "Please launch the app manually from your device home screen"
     fi
 fi
 
-echo ""
-echo -e "${GREEN}🎉 Deployment complete!${NC}"
-echo ""
-echo -e "${BLUE}📱 Your CalendarAlarmApp is now running on $DEVICE_NAME!${NC}"
-echo ""
-echo -e "${PURPLE}🔔 AlarmKit Testing Notes:${NC}"
+# Success summary
+echo
+log_success "🎉 Deployment complete!"
+echo
+log_info "📱 Your $APP_NAME is now running on $([ "$DEVICE_TYPE" = "simulator" ] && echo "iPhone 16 Pro Simulator" || echo "physical device") (iOS 26.0)!"
+
+# Testing notes
+echo
+log_header "🔔 AlarmKit Testing Notes:"
 echo "  • The app uses iOS 26 AlarmKit framework for countdown-based alarms"
 echo "  • Test creating timer alarms with Live Activities in Dynamic Island"
 echo "  • Try pause/resume functionality during countdown"
 echo "  • Verify custom sounds and alert presentations work"
-echo ""
+
 if [ "$DEVICE_TYPE" = "simulator" ]; then
-    echo "📲 Simulator testing tips:"
+    echo
+    log_info "📲 Simulator testing tips:"
     echo "  • Use Device > Trigger Live Activity to test different states"
     echo "  • Check Dynamic Island integration"
     echo "  • Test with locked simulator (Device > Lock)"
-else
-    echo "📱 Physical device testing tips:"
-    echo "  • Ensure AlarmKit permissions are granted"
-    echo "  • Test with device locked for full AlarmKit experience"
-    echo "  • Check Live Activity appears in Dynamic Island"
 fi
-echo ""
-echo -e "${GREEN}Happy testing with iOS 26 AlarmKit! 🚀${NC}"
-echo ""
-echo -e "${BLUE}🔊 DEPLOYMENT SCRIPT FEATURES:${NC}"
-echo "  • ✅ Verbose mode enabled by default (set -x, -verbose)"
-echo "  • ✅ Xcode 16+ hanging bug workaround (domain blocking)"
-echo "  • ✅ 5-minute timeout protection for builds"
-echo "  • ✅ Enhanced error reporting with context"
-echo "  • ✅ Automatic cleanup on script exit"
-echo "  • ✅ Support for both simulators and physical devices"
-echo ""
-echo -e "${YELLOW}🛠️  KNOWN ISSUE RESOLVED:${NC}"
-echo "  This script works around the known Xcode 16+ bug where xcodebuild hangs"
-echo "  during 'GatherProvisioningInputs' by temporarily blocking network calls"
-echo "  to developerservices2.apple.com during the build process."
-echo ""
-echo -e "${YELLOW}💡 To disable verbose mode, remove 'set -x' from line 7 and '-verbose' from xcodebuild${NC}"
+
+echo
+log_success "Happy testing with iOS 26 AlarmKit! 🚀"
+echo
+log_info "💡 To enable verbose mode, run: VERBOSE=true ./deploy-clean.sh"
