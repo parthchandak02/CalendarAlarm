@@ -1,6 +1,7 @@
 {
   "images" : [
     {
+      "filename" : "cal-alarm-icon-squared-black.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -12,6 +13,7 @@
           "value" : "dark"
         }
       ],
+      "filename" : "cal-alarm-icon-squared-white.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -23,6 +25,7 @@
           "value" : "tinted"
         }
       ],
+      "filename" : "cal-alarm-icon-squared-tinted.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
