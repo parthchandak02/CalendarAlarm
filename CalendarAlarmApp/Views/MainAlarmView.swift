@@ -127,6 +127,9 @@ struct AlarmRowView: View {
                 Text(alarm.durationString)
                     .font(.system(size: 50, weight: .thin, design: .default))
                     .foregroundColor(alarm.isEnabled ? .white : .gray)
+                    .minimumScaleFactor(0.5) // Allow text to scale down to 50% if needed
+                    .lineLimit(1) // Keep it on one line
+                    .scaledToFit() // Scale to fit available space
 
                 // Title and countdown info
                 HStack(spacing: 8) {
@@ -142,7 +145,8 @@ struct AlarmRowView: View {
                         .foregroundColor(.gray)
                 }
             }
-
+            .layoutPriority(1) // Give the text section higher priority
+            
             Spacer()
 
             // Toggle switch
@@ -151,6 +155,7 @@ struct AlarmRowView: View {
                 set: { _ in onToggle() }
             ))
             .toggleStyle(SwitchToggleStyle(tint: .orange))
+            .fixedSize() // Prevent the toggle from being compressed
         }
         .padding(.vertical, 16)
         .contentShape(Rectangle())

@@ -30,7 +30,8 @@ struct AlarmData: Identifiable, Codable {
          soundName: String = "Chime",
          snoozeEnabled: Bool = true,
          preAlertMinutes: Int = 10, // 10 min warning before alarm
-         postAlertMinutes: Int = 5) { // 5 min alert duration after alarm fires
+         postAlertMinutes: Int = 5)
+    { // 5 min alert duration after alarm fires
         self.id = id
         self.title = title
         self.isEnabled = isEnabled
@@ -99,12 +100,12 @@ enum Weekday: Int, CaseIterable, Codable {
 }
 
 // MARK: - AlarmKit Metadata (iOS 26 Beta Compatible)
+
 // iOS 26 AlarmKit requires specific concurrency patterns for Swift 6
 
 // Empty AlarmMetadata implementation for iOS 26 beta
 struct EmptyAlarmMetadata: Sendable {
     // Completely empty for iOS 26 beta compatibility
-
 }
 
 // Separate extension to handle AlarmMetadata conformance with @preconcurrency
@@ -114,24 +115,25 @@ extension EmptyAlarmMetadata: @preconcurrency AlarmMetadata {}
 typealias AlarmAppMetadata = EmptyAlarmMetadata
 
 // MARK: - AlarmKit Live Activities (iOS 26)
+
 // AlarmKit handles Live Activities automatically - no manual ActivityAttributes needed
 // Manual ActivityKit integration commented out to prevent conflicts with AlarmKit system Live Activities
 
 /*
-// Legacy manual ActivityKit code - replaced by AlarmKit automatic Live Activities
-struct AlarmCountdownAttributes: ActivityAttributes {
-    public typealias AlarmCountdownStatus = ContentState
+ // Legacy manual ActivityKit code - replaced by AlarmKit automatic Live Activities
+ struct AlarmCountdownAttributes: ActivityAttributes {
+     public typealias AlarmCountdownStatus = ContentState
 
-    public struct ContentState: Codable, Hashable {
-        var alarmTitle: String
-        var remainingTime: ClosedRange<Date>
-        var isPaused: Bool
-    }
+     public struct ContentState: Codable, Hashable {
+         var alarmTitle: String
+         var remainingTime: ClosedRange<Date>
+         var isPaused: Bool
+     }
 
-    var alarmId: String
-    var originalDuration: Int // Duration in minutes
-}
-*/
+     var alarmId: String
+     var originalDuration: Int // Duration in minutes
+ }
+ */
 
 // MARK: - Alarm Store Manager
 
@@ -196,7 +198,8 @@ class AlarmStore: ObservableObject {
 
     private func loadAlarms() {
         if let data = userDefaults.data(forKey: alarmsKey),
-           let decoded = try? JSONDecoder().decode([AlarmData].self, from: data) {
+           let decoded = try? JSONDecoder().decode([AlarmData].self, from: data)
+        {
             alarms = decoded
         }
     }
@@ -223,28 +226,44 @@ class AlarmStore: ObservableObject {
             ) : nil
 
             // Create alert presentation for schedule-based alarms (following official docs)
-            let alertPresentation: AlarmPresentation.Alert
-            if let snoozeButton = snoozeButton {
-                // If snooze is enabled, provide the button and let the system handle the default snooze behavior.
-                alertPresentation = AlarmPresentation.Alert(
-                    title: LocalizedStringResource(stringLiteral: alarm.title),
-                    stopButton: stopButton,
-                    secondaryButton: snoozeButton
-                )
-            } else {
-                // If snooze is disabled, create the alert with only a stop button.
-                alertPresentation = AlarmPresentation.Alert(
-                    title: LocalizedStringResource(stringLiteral: alarm.title),
-                    stopButton: stopButton
-                )
-            }
+            // For schedule-based alarms, AlarmKit provides system snooze automatically
+            let alertPresentation = AlarmPresentation.Alert(
+                title: LocalizedStringResource(stringLiteral: alarm.title),
+                stopButton: stopButton
+                // No secondary button needed - AlarmKit handles snooze system-wide for schedule-based alarms
+            )
 
-            // Create alarm attributes with only alert presentation (schedule-based alarms)
+            // Create countdown presentation (required for countdown-based alarms)
+            let pauseButton = AlarmButton(
+                text: "Pause",
+                textColor: .orange,
+                systemImageName: "pause"
+            )
+
+            let countdownPresentation = AlarmPresentation.Countdown(
+                title: LocalizedStringResource(stringLiteral: alarm.title),
+                pauseButton: pauseButton
+            )
+
+            // Create paused presentation
+            let resumeButton = AlarmButton(
+                text: "Resume",
+                textColor: .orange,
+                systemImageName: "play"
+            )
+
+            let pausedPresentation = AlarmPresentation.Paused(
+                title: LocalizedStringResource(stringLiteral: "Paused"),
+                resumeButton: resumeButton
+            )
+
+            // Create alarm attributes with all presentations (countdown-based alarms)
             let metadata = AlarmAppMetadata() // Empty metadata for iOS 26 beta
             let attributes = AlarmAttributes<AlarmAppMetadata>(
                 presentation: AlarmPresentation(
-                    alert: alertPresentation
-                    // No countdown or paused presentations for schedule-based alarms
+                    alert: alertPresentation,
+                    countdown: countdownPresentation,
+                    paused: pausedPresentation
                 ),
                 metadata: metadata,
                 tintColor: Color.orange
@@ -253,22 +272,25 @@ class AlarmStore: ObservableObject {
             // Create sound configuration (following official Apple docs)
             // Note: Sound will be configured in AlarmConfiguration.init
 
-            // Create schedule for specific future time (using AlarmKit schedule-based approach)
-            let schedule = Alarm.Schedule.fixed(alarm.alarmDate)
+            // Calculate countdown duration from current time to alarm time (proper AlarmKit pattern)
+            let countdownSeconds = max(30, alarm.alarmDate.timeIntervalSinceNow) // Ensure at least 30 seconds
             
-            // Create alarm configuration with fixed schedule (following official Apple AlarmKit docs)
+            // Create countdown duration with preAlert and postAlert (following official Apple AlarmKit docs)
+            let countdownDuration = Alarm.CountdownDuration(
+                preAlert: countdownSeconds, 
+                postAlert: TimeInterval(alarm.postAlertMinutes * 60) // Convert minutes to seconds
+            )
+            
+            // Create alarm configuration with countdown duration (following official Apple AlarmKit docs)
             let alarmConfiguration = AlarmConfiguration(
-                schedule: schedule,
-                attributes: attributes,
-                stopIntent: nil, // Optional app intent for stop action
-                secondaryIntent: nil, // Optional app intent for secondary action  
-                sound: .default // Using default system alarm sound
+                countdownDuration: countdownDuration,
+                attributes: attributes
             )
 
             _ = try await AlarmManager.shared.schedule(id: alarm.id, configuration: alarmConfiguration)
 
-            print("✅ Scheduled AlarmKit alarm: '\(alarm.title)' - \(alarm.durationString)")
-            print("🎯 Schedule-based alarm set for: \(alarm.alarmDate.formatted())")
+            print("✅ Scheduled AlarmKit countdown alarm: '\(alarm.title)' - \(alarm.durationString)")
+            print("🎯 Countdown alarm will fire in: \(countdownSeconds) seconds at \(alarm.alarmDate.formatted())")
 
         } catch {
             print("❌ Failed to schedule AlarmKit alarm: \(error)")
@@ -290,8 +312,9 @@ class AlarmStore: ObservableObject {
             try? AlarmManager.shared.cancel(id: alarmId)
         }
     }
-    
+
     // MARK: - Live Activity Management (AlarmKit)
+
     // AlarmKit in iOS 26 handles Live Activities automatically when scheduling alarms
     // Manual ActivityKit integration removed to prevent conflicts with system Live Activities
 }

@@ -41,14 +41,29 @@ if [ $# -eq 1 ]; then
         "status"|"s")
             MONITOR_MODE="status"
             ;;
+        "lifecycle"|"l")
+            MONITOR_MODE="lifecycle"
+            ;;
+        "auth"|"a")
+            MONITOR_MODE="auth"
+            ;;
+        "notifications"|"n")
+            MONITOR_MODE="notifications"
+            ;;
         *)
             log_error "Invalid argument: $1"
             echo
             echo "Usage:"
-            echo "  ./deploy.sh 1        Deploy to iOS Simulator"
-            echo "  ./deploy.sh 2        Deploy to Physical Device"
-            echo "  ./deploy.sh monitor  Monitor Live Activities (15 sec)"
-            echo "  ./deploy.sh m        Monitor Live Activities (short)"
+            echo "  ./deploy.sh 1               Deploy to iOS Simulator"
+            echo "  ./deploy.sh 2               Deploy to Physical Device"
+            echo "  ./deploy.sh monitor         Monitor Live Activities (15 sec)"
+            echo "  ./deploy.sh m               Monitor Live Activities (short)"
+            echo "  ./deploy.sh lifecycle       Monitor AlarmKit lifecycle (30 sec)"
+            echo "  ./deploy.sh l               Monitor AlarmKit lifecycle (short)"
+            echo "  ./deploy.sh auth            Check AlarmKit authorization"
+            echo "  ./deploy.sh a               Check authorization (short)"
+            echo "  ./deploy.sh notifications   Debug alarm notifications (20 sec)"
+            echo "  ./deploy.sh n               Debug notifications (short)"
             echo "  ./deploy.sh status   Check Live Activity status"
             echo "  ./deploy.sh s        Check Live Activity status (short)"
             echo "  ./deploy.sh          Auto-detect (legacy mode)"
@@ -67,12 +82,36 @@ elif [ $# -eq 2 ]; then
                 exit 1
             fi
             ;;
+        "lifecycle"|"l")
+            MONITOR_MODE="lifecycle"
+            # Second argument is duration
+            if [[ "$2" =~ ^[0-9]+$ ]]; then
+                MONITOR_DURATION="$2"
+            else
+                log_error "Invalid duration: $2 (must be number of seconds)"
+                exit 1
+            fi
+            ;;
+        "notifications"|"n")
+            MONITOR_MODE="notifications"
+            # Second argument is duration
+            if [[ "$2" =~ ^[0-9]+$ ]]; then
+                MONITOR_DURATION="$2"
+            else
+                log_error "Invalid duration: $2 (must be number of seconds)"
+                exit 1
+            fi
+            ;;
         *)
             log_error "Invalid arguments: $1 $2"
             echo
             echo "Usage:"
-            echo "  ./deploy.sh monitor 30   Monitor Live Activities for 30 seconds"
-            echo "  ./deploy.sh m 30         Monitor Live Activities for 30 seconds"
+            echo "  ./deploy.sh monitor 30       Monitor Live Activities for 30 seconds"
+            echo "  ./deploy.sh m 30             Monitor Live Activities for 30 seconds"
+            echo "  ./deploy.sh lifecycle 45     Monitor AlarmKit lifecycle for 45 seconds"
+            echo "  ./deploy.sh l 45             Monitor AlarmKit lifecycle for 45 seconds"
+            echo "  ./deploy.sh notifications 25  Debug alarm notifications for 25 seconds"
+            echo "  ./deploy.sh n 25             Debug notifications for 25 seconds"
             exit 1
             ;;
     esac
@@ -98,6 +137,15 @@ if [ -n "$MONITOR_MODE" ]; then
             ;;
         "status")
             check_activity_status
+            ;;
+        "lifecycle")
+            monitor_alarm_lifecycle "${MONITOR_DURATION:-30}"
+            ;;
+        "auth")
+            check_alarm_authorization
+            ;;
+        "notifications")
+            debug_alarm_notifications "${MONITOR_DURATION:-20}"
             ;;
     esac
     exit 0

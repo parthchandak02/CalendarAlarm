@@ -174,18 +174,25 @@ monitor_live_activities() {
     log_info "Watching for AlarmKit and ActivityKit logs..."
     log_info "Create a timer in the app now!"
     
-    # Monitor for the specified duration
+    # Enhanced AlarmKit-specific monitoring
     run_with_timeout "$duration" xcrun simctl spawn booted log stream --predicate '
         subsystem CONTAINS "AlarmKit" OR 
         subsystem CONTAINS "ActivityKit" OR 
         subsystem CONTAINS "liveactivitiesd" OR 
         subsystem CONTAINS "mobiletimerd" OR 
+        subsystem CONTAINS "AlarmKitCore" OR
         process == "CalendarAlarmApp" OR 
         message CONTAINS "Live Activity" OR 
         message CONTAINS "activity" OR
         message CONTAINS "systemAperture" OR
         message CONTAINS "Dynamic" OR
-        message CONTAINS "preferredLayoutMode"
+        message CONTAINS "preferredLayoutMode" OR
+        message CONTAINS "alarm" OR
+        message CONTAINS "Firing event" OR
+        message CONTAINS "Transitioning" OR
+        message CONTAINS "countdown" OR
+        message CONTAINS "timer alert" OR
+        message CONTAINS "notification"
     ' --info 2>/dev/null || true
     
     echo ""
@@ -240,4 +247,88 @@ monitor_activity_by_id() {
     run_with_timeout "$duration" xcrun simctl spawn booted log stream --predicate "
         message CONTAINS \"$activity_id\"
     " --info 2>/dev/null || true
+}
+
+# AlarmKit-specific debugging functions
+monitor_alarm_lifecycle() {
+    local duration=${1:-30}
+    echo_section "⏰ Monitoring AlarmKit Lifecycle for ${duration} seconds"
+    
+    log_info "Watching for alarm scheduling, firing, and transitions..."
+    log_info "Create an alarm in the app to see its full lifecycle!"
+    
+    # Focus on alarm lifecycle events
+    run_with_timeout "$duration" xcrun simctl spawn booted log stream --predicate '
+        (subsystem CONTAINS "AlarmKitCore" AND (
+            message CONTAINS "schedule" OR
+            message CONTAINS "Firing event" OR
+            message CONTAINS "Transitioning" OR
+            message CONTAINS "countdown to alert" OR
+            message CONTAINS "Created activity" OR
+            message CONTAINS "Updating activity"
+        )) OR
+        (subsystem CONTAINS "mobiletimerd" AND (
+            message CONTAINS "firing alarmkit" OR
+            message CONTAINS "timer alert" OR
+            message CONTAINS "adding request"
+        ))
+    ' --info 2>/dev/null || true
+    
+    echo ""
+    log_success "AlarmKit lifecycle monitoring completed"
+}
+
+# Check alarm authorization status
+check_alarm_authorization() {
+    echo_section "🔐 AlarmKit Authorization Status"
+    
+    log_info "Checking AlarmKit authorization for CalendarAlarmApp..."
+    
+    # Look for authorization-related logs
+    local auth_logs=$(xcrun simctl spawn booted log show --predicate '
+        subsystem CONTAINS "mobiletimerd" AND 
+        message CONTAINS "CalendarAlarmApp" AND (
+            message CONTAINS "authorized" OR
+            message CONTAINS "denied" OR
+            message CONTAINS "authorization"
+        )
+    ' --info --last 300s 2>/dev/null | tail -5)
+    
+    if [ -n "$auth_logs" ]; then
+        echo "$auth_logs"
+    else
+        log_warning "No recent authorization logs found"
+        log_info "Try creating an alarm to trigger authorization check"
+    fi
+}
+
+# Debug alarm notifications
+debug_alarm_notifications() {
+    local duration=${1:-20}
+    echo_section "🔔 Debugging Alarm Notifications for ${duration} seconds"
+    
+    log_info "Monitoring notification delivery and alert presentations..."
+    log_info "Create an alarm and wait for it to fire!"
+    
+    # Focus on notification-related logs
+    run_with_timeout "$duration" xcrun simctl spawn booted log stream --predicate '
+        (subsystem CONTAINS "UserNotifications" AND (
+            message CONTAINS "CalendarAlarmApp" OR
+            message CONTAINS "alarmkit" OR
+            message CONTAINS "timer"
+        )) OR
+        (process CONTAINS "SpringBoard" AND (
+            message CONTAINS "alarm" OR
+            message CONTAINS "notification" OR
+            message CONTAINS "banner"
+        )) OR
+        (subsystem CONTAINS "mobiletimerd" AND (
+            message CONTAINS "notification" OR
+            message CONTAINS "alert" OR
+            message CONTAINS "firing"
+        ))
+    ' --info 2>/dev/null || true
+    
+    echo ""
+    log_success "Notification debugging completed"
 }

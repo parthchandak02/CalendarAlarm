@@ -198,10 +198,15 @@ struct AddEditAlarmView: View {
     // MARK: - Actions
 
     private func saveAlarm() {
+        // Ensure alarm time is in the future (at least 30 seconds from now)
+        let now = Date()
+        let minimumFutureTime = now.addingTimeInterval(30) // 30 seconds buffer
+        let validAlarmDate = alarmDate < minimumFutureTime ? minimumFutureTime : alarmDate
+        
         let alarm = AlarmData(
             title: title.isEmpty ? "Title" : title,
             isEnabled: true,
-            alarmDate: alarmDate,
+            alarmDate: validAlarmDate,
             soundName: soundName,
             snoozeEnabled: snoozeEnabled,
             preAlertMinutes: preAlertMinutes,
@@ -214,13 +219,13 @@ struct AddEditAlarmView: View {
             updatedAlarm = AlarmData(
                 title: title.isEmpty ? "Title" : title,
                 isEnabled: editingAlarm.isEnabled,
-                alarmDate: alarmDate,
+                alarmDate: validAlarmDate,
                 soundName: soundName,
                 snoozeEnabled: snoozeEnabled,
                 preAlertMinutes: preAlertMinutes,
                 postAlertMinutes: postAlertMinutes
             )
-            alarmStore.updateAlarm(editingAlarm)
+            alarmStore.updateAlarm(updatedAlarm)
         } else {
             alarmStore.addAlarm(alarm)
         }
