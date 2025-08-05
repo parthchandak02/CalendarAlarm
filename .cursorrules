@@ -1,4 +1,4 @@
-1. Please use the shell script "deploy.sh" to do the testing. Remember we need to test with xcrun simctl list devices available | grep -i "iOS 26" 
+1. Please use the shell script "deploy.sh" to do the testing. 
 
 2. Please use this mcp tool to get the latest apple docs, especially when stuck. Please remember that AlarmKit is the new iOS Framework started in iOS 26.0 We are using but not limited to the AlarmKit framework in iOS 26, with Xcode Developer Beta 26 v4.  
 mcp tool name = apple-doc-mcp
@@ -6,6 +6,8 @@ mcp tool name = apple-doc-mcp
 - get_documentation
 - search_symbols
 - check_updates
+
+3. You can use these docs for testing as needed: alarmkit-docs.md
 
 3. Make todos whenever possible, smaller tasks and quick testing
 

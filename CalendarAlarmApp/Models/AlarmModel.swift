@@ -45,7 +45,7 @@ struct AlarmData: Identifiable, Codable {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         formatter.dateStyle = .none
-        
+
         // If alarm is today, show just time
         if Calendar.current.isDate(alarmDate, inSameDayAs: Date()) {
             return formatter.string(from: alarmDate)
@@ -104,7 +104,7 @@ enum Weekday: Int, CaseIterable, Codable {
 // Empty AlarmMetadata implementation for iOS 26 beta
 struct EmptyAlarmMetadata: Sendable {
     // Completely empty for iOS 26 beta compatibility
-    init() {}
+
 }
 
 // Separate extension to handle AlarmMetadata conformance with @preconcurrency
@@ -215,53 +215,36 @@ class AlarmStore: ObservableObject {
                 systemImageName: "stop.circle"
             )
 
-            let repeatButton = AlarmButton(
-                text: "Repeat",
-                textColor: .white,
-                systemImageName: "repeat.circle"
-            )
+            // Create snooze button for schedule-based alarms
+            let snoozeButton = alarm.snoozeEnabled ? AlarmButton(
+                text: "Snooze",
+                textColor: .orange,
+                systemImageName: "clock.badge.questionmark"
+            ) : nil
 
-            // Create alert presentation (following docs pattern)
-            let alertPresentation = AlarmPresentation.Alert(
-                title: LocalizedStringResource(stringLiteral: alarm.title),
-                stopButton: stopButton,
-                secondaryButton: alarm.snoozeEnabled ? repeatButton : nil,
-                secondaryButtonBehavior: .countdown
-            )
+            // Create alert presentation for schedule-based alarms (following official docs)
+            let alertPresentation: AlarmPresentation.Alert
+            if let snoozeButton = snoozeButton {
+                // If snooze is enabled, provide the button and let the system handle the default snooze behavior.
+                alertPresentation = AlarmPresentation.Alert(
+                    title: LocalizedStringResource(stringLiteral: alarm.title),
+                    stopButton: stopButton,
+                    secondaryButton: snoozeButton
+                )
+            } else {
+                // If snooze is disabled, create the alert with only a stop button.
+                alertPresentation = AlarmPresentation.Alert(
+                    title: LocalizedStringResource(stringLiteral: alarm.title),
+                    stopButton: stopButton
+                )
+            }
 
-            // Create pause button for countdown
-            let pauseButton = AlarmButton(
-                text: "Pause",
-                textColor: .green,
-                systemImageName: "pause"
-            )
-
-            // Create countdown presentation
-            let countdownPresentation = AlarmPresentation.Countdown(
-                title: LocalizedStringResource(stringLiteral: alarm.title),
-                pauseButton: pauseButton
-            )
-
-            // Create resume button for paused state
-            let resumeButton = AlarmButton(
-                text: "Resume",
-                textColor: .green,
-                systemImageName: "play"
-            )
-
-            // Create paused presentation
-            let pausedPresentation = AlarmPresentation.Paused(
-                title: LocalizedStringResource("Paused"),
-                resumeButton: resumeButton
-            )
-
-            // Create alarm attributes with all presentations (following docs)
+            // Create alarm attributes with only alert presentation (schedule-based alarms)
             let metadata = AlarmAppMetadata() // Empty metadata for iOS 26 beta
             let attributes = AlarmAttributes<AlarmAppMetadata>(
                 presentation: AlarmPresentation(
-                    alert: alertPresentation,
-                    countdown: countdownPresentation,
-                    paused: pausedPresentation
+                    alert: alertPresentation
+                    // No countdown or paused presentations for schedule-based alarms
                 ),
                 metadata: metadata,
                 tintColor: Color.orange
@@ -274,7 +257,7 @@ class AlarmStore: ObservableObject {
             let schedule = Alarm.Schedule.fixed(alarm.alarmDate)
             
             // Create alarm configuration with fixed schedule (following official Apple AlarmKit docs)
-            let alarmConfiguration = AlarmManager.AlarmConfiguration.alarm(
+            let alarmConfiguration = AlarmConfiguration(
                 schedule: schedule,
                 attributes: attributes,
                 stopIntent: nil, // Optional app intent for stop action
@@ -285,7 +268,7 @@ class AlarmStore: ObservableObject {
             _ = try await AlarmManager.shared.schedule(id: alarm.id, configuration: alarmConfiguration)
 
             print("✅ Scheduled AlarmKit alarm: '\(alarm.title)' - \(alarm.durationString)")
-            print("🎯 AlarmKit will handle Live Activities automatically")
+            print("🎯 Schedule-based alarm set for: \(alarm.alarmDate.formatted())")
 
         } catch {
             print("❌ Failed to schedule AlarmKit alarm: \(error)")
