@@ -275,4 +275,89 @@ AlarmManager.shared.alarmUpdates   // Listen for changes
 3. **Apple Developer Documentation** - Platform requirements and best practices
 4. **Swift Evolution Proposals** - Protocol conformance patterns (@unchecked Sendable)
 
+---
+
+## Recent Implementation Learnings (Real-World Testing)
+
+### Live Activity Countdown Display
+
+**Key Discovery**: Use SwiftUI's `Text(timerInterval:countsDown:)` for real-time countdown display:
+
+```swift
+// ✅ This creates a live, auto-updating countdown
+if case .countdown(let countdown) = context.state.mode {
+    let fireDate = countdown.startDate.addingTimeInterval(
+        countdown.totalCountdownDuration - countdown.previouslyElapsedDuration
+    )
+    Text(timerInterval: Date()...fireDate, countsDown: true)
+        .font(.subheadline)
+        .fontWeight(.medium)
+        .foregroundColor(.red)
+        .monospacedDigit()
+}
+```
+
+**Source**: Testing revealed static text doesn't update; this pattern provides automatic countdown updates.
+
+### AlarmMetadata Protocol Conformance
+
+**Critical Fix**: Use `nonisolated(unsafe)` for proper Swift 6/iOS 26 compatibility:
+
+```swift
+nonisolated(unsafe) struct EmptyAlarmMetadata: AlarmMetadata, Sendable, Codable {
+    let title: String
+    
+    nonisolated init(title: String = "Alarm") {
+        self.title = title
+    }
+}
+```
+
+**Source**: Compilation testing showed this resolves actor isolation issues in iOS 26 beta.
+
+### Snooze Button Configuration
+
+**Working Pattern**: Secondary button with countdown behavior:
+
+```swift
+let alertPresentation = AlarmPresentation.Alert(
+    title: LocalizedStringResource(stringLiteral: alarm.title),
+    stopButton: stopButton,
+    secondaryButton: snoozeButton,
+    secondaryButtonBehavior: alarm.snoozeEnabled ? .countdown : nil
+)
+```
+
+**Source**: Testing confirmed snooze appears with proper secondary button configuration.
+
+### Dynamic Island Countdown
+
+**Success Pattern**: Live countdown text in compact trailing view:
+
+```swift
+// Shows actual countdown numbers in Dynamic Island
+if case .countdown(let countdown) = context.state.mode {
+    let fireDate = countdown.startDate.addingTimeInterval(
+        countdown.totalCountdownDuration - countdown.previouslyElapsedDuration
+    )
+    Text(timerInterval: Date()...fireDate, countsDown: true)
+        .font(.caption)
+        .fontWeight(.bold)
+        .foregroundColor(.red)
+        .monospacedDigit()
+}
+```
+
+**Source**: Real device testing confirmed this displays live countdown in Dynamic Island.
+
+---
+
+## Documentation Sources
+
+1. **Apple AlarmKit Official Documentation** - Core API reference
+2. **WWDC 2025 - Wake up to the AlarmKit API** - Comprehensive framework overview  
+3. **Apple Developer Documentation** - Platform requirements and best practices
+4. **Swift Evolution Proposals** - Protocol conformance patterns (@unchecked Sendable)
+5. **Real-World Implementation Testing** - Live Activity patterns and UI optimization
+
 This guide provides the essential information needed to successfully implement AlarmKit in your iOS 26+ applications while avoiding common pitfalls and compilation errors.
