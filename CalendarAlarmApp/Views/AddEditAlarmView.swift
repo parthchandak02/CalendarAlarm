@@ -112,10 +112,10 @@ struct AddEditAlarmView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                
+
                 Divider()
                     .background(Color.gray.opacity(0.3))
-                
+
                 // Sound Row
                 Button(action: {
                     showingSoundPicker = true
@@ -135,10 +135,10 @@ struct AddEditAlarmView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                 }
-                
+
                 Divider()
                     .background(Color.gray.opacity(0.3))
-                
+
                 // Snooze Row
                 HStack {
                     Text("Snooze")
@@ -150,10 +150,10 @@ struct AddEditAlarmView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                
+
                 Divider()
                     .background(Color.gray.opacity(0.3))
-                
+
                 // Pre-Alert Row
                 HStack {
                     Text("Pre-Alert")
@@ -169,10 +169,10 @@ struct AddEditAlarmView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                
+
                 Divider()
                     .background(Color.gray.opacity(0.3))
-                
+
                 // Alert Duration Row
                 HStack {
                     Text("Duration")
@@ -202,7 +202,7 @@ struct AddEditAlarmView: View {
         let now = Date()
         let minimumFutureTime = now.addingTimeInterval(30) // 30 seconds buffer
         let validAlarmDate = alarmDate < minimumFutureTime ? minimumFutureTime : alarmDate
-        
+
         let alarm = AlarmData(
             title: title.isEmpty ? "Title" : title,
             isEnabled: true,

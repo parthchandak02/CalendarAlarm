@@ -30,8 +30,7 @@ struct AlarmData: Identifiable, Codable {
          soundName: String = "Chime",
          snoozeEnabled: Bool = true,
          preAlertMinutes: Int = 10, // 10 min warning before alarm
-         postAlertMinutes: Int = 5)
-    { // 5 min alert duration after alarm fires
+         postAlertMinutes: Int = 5) { // 5 min alert duration after alarm fires
         self.id = id
         self.title = title
         self.isEnabled = isEnabled
@@ -103,13 +102,17 @@ enum Weekday: Int, CaseIterable, Codable {
 
 // iOS 26 AlarmKit requires specific concurrency patterns for Swift 6
 
-// Empty AlarmMetadata implementation for iOS 26 beta
-struct EmptyAlarmMetadata: Sendable {
-    // Completely empty for iOS 26 beta compatibility
-}
+// AlarmMetadata implementation following official Apple documentation pattern
+// Using nonisolated to avoid actor isolation issues with Sendable conformance
+nonisolated(unsafe) struct EmptyAlarmMetadata: AlarmMetadata, Sendable, Codable {
+    // Following exact pattern from Apple's CookingData example
+    // Simple title property to satisfy AlarmMetadata requirements
+    let title: String
 
-// Separate extension to handle AlarmMetadata conformance with @preconcurrency
-extension EmptyAlarmMetadata: @preconcurrency AlarmMetadata {}
+    nonisolated init(title: String = "Alarm") {
+        self.title = title
+    }
+}
 
 // Use empty metadata to avoid iOS 26 beta protocol conformance issues
 typealias AlarmAppMetadata = EmptyAlarmMetadata
@@ -198,8 +201,7 @@ class AlarmStore: ObservableObject {
 
     private func loadAlarms() {
         if let data = userDefaults.data(forKey: alarmsKey),
-           let decoded = try? JSONDecoder().decode([AlarmData].self, from: data)
-        {
+           let decoded = try? JSONDecoder().decode([AlarmData].self, from: data) {
             alarms = decoded
         }
     }
@@ -219,7 +221,7 @@ class AlarmStore: ObservableObject {
             )
 
             // Create snooze button for schedule-based alarms
-            let snoozeButton = alarm.snoozeEnabled ? AlarmButton(
+            _ = alarm.snoozeEnabled ? AlarmButton(
                 text: "Snooze",
                 textColor: .orange,
                 systemImageName: "clock.badge.questionmark"
@@ -274,13 +276,13 @@ class AlarmStore: ObservableObject {
 
             // Calculate countdown duration from current time to alarm time (proper AlarmKit pattern)
             let countdownSeconds = max(30, alarm.alarmDate.timeIntervalSinceNow) // Ensure at least 30 seconds
-            
+
             // Create countdown duration with preAlert and postAlert (following official Apple AlarmKit docs)
             let countdownDuration = Alarm.CountdownDuration(
-                preAlert: countdownSeconds, 
+                preAlert: countdownSeconds,
                 postAlert: TimeInterval(alarm.postAlertMinutes * 60) // Convert minutes to seconds
             )
-            
+
             // Create alarm configuration with countdown duration (following official Apple AlarmKit docs)
             let alarmConfiguration = AlarmConfiguration(
                 countdownDuration: countdownDuration,

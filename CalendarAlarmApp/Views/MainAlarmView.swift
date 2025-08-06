@@ -146,7 +146,7 @@ struct AlarmRowView: View {
                 }
             }
             .layoutPriority(1) // Give the text section higher priority
-            
+
             Spacer()
 
             // Toggle switch
