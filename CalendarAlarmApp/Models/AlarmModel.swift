@@ -221,24 +221,24 @@ class AlarmStore: ObservableObject {
             )
 
             // Create snooze button for schedule-based alarms
-            _ = alarm.snoozeEnabled ? AlarmButton(
+            let snoozeButton = alarm.snoozeEnabled ? AlarmButton(
                 text: "Snooze",
-                textColor: .orange,
+                textColor: .white,
                 systemImageName: "clock.badge.questionmark"
             ) : nil
 
             // Create alert presentation for schedule-based alarms (following official docs)
-            // For schedule-based alarms, AlarmKit provides system snooze automatically
             let alertPresentation = AlarmPresentation.Alert(
                 title: LocalizedStringResource(stringLiteral: alarm.title),
-                stopButton: stopButton
-                // No secondary button needed - AlarmKit handles snooze system-wide for schedule-based alarms
+                stopButton: stopButton,
+                secondaryButton: snoozeButton,
+                secondaryButtonBehavior: alarm.snoozeEnabled ? .countdown : nil
             )
 
             // Create countdown presentation (required for countdown-based alarms)
             let pauseButton = AlarmButton(
                 text: "Pause",
-                textColor: .orange,
+                textColor: .red,
                 systemImageName: "pause"
             )
 
@@ -250,7 +250,7 @@ class AlarmStore: ObservableObject {
             // Create paused presentation
             let resumeButton = AlarmButton(
                 text: "Resume",
-                textColor: .orange,
+                textColor: .red,
                 systemImageName: "play"
             )
 
@@ -268,7 +268,7 @@ class AlarmStore: ObservableObject {
                     paused: pausedPresentation
                 ),
                 metadata: metadata,
-                tintColor: Color.orange
+                tintColor: Color.red
             )
 
             // Create sound configuration (following official Apple docs)

@@ -52,7 +52,7 @@ struct AlarmLockScreenView: View {
         VStack(spacing: 12) {
             HStack {
                 Image(systemName: "timer")
-                    .foregroundColor(.orange)
+                    .foregroundColor(.red)
                 Text(context.attributes.metadata?.title ?? "Alarm")
                     .font(.headline)
                 Spacer()
@@ -150,7 +150,7 @@ struct AlarmCompactLeading: View {
 
     var body: some View {
         Image(systemName: "timer")
-            .foregroundColor(.orange)
+            .foregroundColor(.red)
     }
 }
 
@@ -158,11 +158,20 @@ struct AlarmCompactTrailing: View {
     let context: ActivityViewContext<AlarmAttributes<AlarmAppMetadata>>
 
     var body: some View {
-        // Show countdown time in Dynamic Island
-        Text("⏱")
-            .font(.caption)
-            .fontWeight(.bold)
-            .foregroundColor(.orange)
+        // Show actual countdown time in Dynamic Island
+        if case .countdown(let countdown) = context.state.mode {
+            let fireDate = countdown.startDate.addingTimeInterval(countdown.totalCountdownDuration - countdown.previouslyElapsedDuration)
+            Text(timerInterval: Date()...fireDate, countsDown: true)
+                .font(.caption)
+                .fontWeight(.bold)
+                .foregroundColor(.red)
+                .monospacedDigit()
+        } else {
+            Text("⏱")
+                .font(.caption)
+                .fontWeight(.bold)
+                .foregroundColor(.red)
+        }
     }
 }
 
@@ -195,16 +204,25 @@ struct CountdownView: View {
             // AlarmKit manages the countdown timer display
             Image(systemName: "timer")
                 .font(.title)
-                .foregroundColor(.orange)
+                .foregroundColor(.red)
 
             Text("Countdown Active")
                 .font(.headline)
-                .foregroundColor(.orange)
+                .foregroundColor(.red)
 
-            // Show actual countdown time using AlarmKit's countdown state
-            Text("Time remaining")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            // Show actual countdown timer using proper SwiftUI Text countdown
+            if case .countdown(let countdown) = context.state.mode {
+                let fireDate = countdown.startDate.addingTimeInterval(countdown.totalCountdownDuration - countdown.previouslyElapsedDuration)
+                Text(timerInterval: Date()...fireDate, countsDown: true)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.red)
+                    .monospacedDigit()
+            } else {
+                Text("Time remaining")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
         }
     }
 }
