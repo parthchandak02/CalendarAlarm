@@ -11,9 +11,9 @@ source "$SCRIPT_DIR/deploy-lib.sh"
 
 # Configuration
 PROJECT_NAME="CalendarAlarmApp.xcodeproj"
-SCHEME="CalendarAlarmApp"
+TARGET="CalendarAlarmApp"
 CONFIGURATION="Debug"
-DERIVED_DATA_PATH="./DerivedData"
+BUILD_PATH="./build"
 APP_NAME="CalendarAlarmApp"
 
 # Verbose mode (set VERBOSE=true for detailed output)
@@ -226,8 +226,8 @@ fi
 
 # Clean build
 echo_section "🧹 Cleaning previous builds"
-rm -rf "$DERIVED_DATA_PATH"
-log_success "Cleaned DerivedData"
+    rm -rf "$BUILD_PATH"
+log_success "Cleaned build directory"
 
 # Build with Xcode bug workaround
 echo_section "🔨 Building $APP_NAME"
@@ -247,9 +247,9 @@ fi
 ANTI_HANG_FLAGS="-skipPackageSignatureValidation -skipMacroValidation -disableAutomaticPackageResolution"
 
 if [ "$VERBOSE" = "true" ]; then
-    BUILD_CMD="xcodebuild -project \"$PROJECT_NAME\" -scheme \"$SCHEME\" -configuration \"$CONFIGURATION\" -destination \"$DESTINATION\" -derivedDataPath \"$DERIVED_DATA_PATH\" $ANTI_HANG_FLAGS -verbose build"
+    BUILD_CMD="xcodebuild -project \"$PROJECT_NAME\" -target \"$TARGET\" -sdk iphonesimulator -configuration \"$CONFIGURATION\" -destination \"$DESTINATION\" $ANTI_HANG_FLAGS CODE_SIGN_IDENTITY=\"\" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO SYMROOT=\"$BUILD_PATH\" -verbose build"
 else
-    BUILD_CMD="xcodebuild -project \"$PROJECT_NAME\" -scheme \"$SCHEME\" -configuration \"$CONFIGURATION\" -destination \"$DESTINATION\" -derivedDataPath \"$DERIVED_DATA_PATH\" $ANTI_HANG_FLAGS build"
+    BUILD_CMD="xcodebuild -project \"$PROJECT_NAME\" -target \"$TARGET\" -sdk iphonesimulator -configuration \"$CONFIGURATION\" -destination \"$DESTINATION\" $ANTI_HANG_FLAGS CODE_SIGN_IDENTITY=\"\" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO SYMROOT=\"$BUILD_PATH\" build"
 fi
 
 log_step "Building with 5-minute timeout protection..."
@@ -274,13 +274,13 @@ fi
 # Find built app
 echo_section "🔍 Locating built app"
 if [ "$DEVICE_TYPE" = "simulator" ]; then
-    APP_PATH=$(find "$DERIVED_DATA_PATH" -name "$APP_NAME.app" -path "*iphonesimulator*" -type d | head -n1)
+    APP_PATH=$(find "$BUILD_PATH" -name "$APP_NAME.app" -path "*iphonesimulator*" -type d | head -n1)
 else
-    APP_PATH=$(find "$DERIVED_DATA_PATH" -name "$APP_NAME.app" -path "*iphoneos*" -type d | head -n1)
+    APP_PATH=$(find "$BUILD_PATH" -name "$APP_NAME.app" -path "*iphoneos*" -type d | head -n1)
 fi
 
 check_file "$APP_PATH/Info.plist" || {
-    log_error "Built app not found in $DERIVED_DATA_PATH"
+    log_error "Built app not found in $BUILD_PATH"
     exit 1
 }
 

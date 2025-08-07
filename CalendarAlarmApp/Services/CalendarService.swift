@@ -40,6 +40,12 @@ class CalendarService: ObservableObject {
         }
     }
     
+    deinit {
+        // Cancel any pending reload task to prevent memory leaks
+        reloadTask?.cancel()
+        print("🗑️ CalendarService deinitalized, reload task cancelled")
+    }
+    
     // MARK: - Authorization
     
     func checkAuthorizationStatus() {
@@ -67,15 +73,37 @@ class CalendarService: ObservableObject {
     
     // MARK: - Calendar Monitoring
     
+    @MainActor
+    private var reloadTask: Task<Void, Never>?
+    
     private func setupCalendarChangeMonitoring() {
         // Monitor calendar changes using NotificationCenter
         print("🔧 Setting up calendar change monitoring...")
         NotificationCenter.default.publisher(for: .EKEventStoreChanged)
-            .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main) // Debounce rapid changes
+            .debounce(for: .milliseconds(750), scheduler: DispatchQueue.main) // Optimal debounce timing based on research
             .sink { [weak self] notification in
                 print("📅🔄 Calendar database changed! Notification: \(notification)")
-                Task {
-                    await self?.loadCalendarEvents()
+                
+                // Cancel any existing reload task to prevent race conditions
+                self?.reloadTask?.cancel()
+                
+                // Start new reload task with proper cancellation handling
+                self?.reloadTask = Task { @MainActor in
+                    guard let self = self else { return }
+                    
+                    // Check if task was cancelled before proceeding
+                    guard !Task.isCancelled else {
+                        print("📅⚠️ Calendar reload task was cancelled")
+                        return
+                    }
+                    
+                    print("📅🔄 Starting calendar event reload...")
+                    await self.loadCalendarEvents()
+                    
+                    // Verify task wasn't cancelled during execution
+                    if !Task.isCancelled {
+                        print("📅✅ Calendar event reload completed successfully")
+                    }
                 }
             }
             .store(in: &cancellables)
@@ -84,6 +112,12 @@ class CalendarService: ObservableObject {
     }
     
     // MARK: - Event Loading
+    
+    /// Manual refresh method that can be called from UI
+    func refreshCalendarEvents() async {
+        print("📅🔄 Manual calendar refresh requested")
+        await loadCalendarEvents()
+    }
     
     func loadCalendarEvents() async {
         guard authorizationStatus == .fullAccess else {
@@ -138,14 +172,50 @@ class CalendarService: ObservableObject {
         
         await MainActor.run {
             let previousCount = self.calendarEvents.count
+            let previousEventIds = Set(self.calendarEvents.map { $0.originalEventId ?? $0.id })
+            let newEventIds = Set(calendarAlarmEvents.map { $0.originalEventId ?? $0.id })
+            
+            // Check for meaningful changes beyond just count
+            let hasChanges = previousCount != calendarAlarmEvents.count || 
+                           previousEventIds != newEventIds ||
+                           self.hasEventContentChanged(previous: self.calendarEvents, new: calendarAlarmEvents)
+            
             self.calendarEvents = calendarAlarmEvents
             self.isLoading = false
             
             print("📅📊 Calendar events updated: \(previousCount) → \(calendarAlarmEvents.count) alarm events")
-            if previousCount != calendarAlarmEvents.count {
-                print("📅🔔 Calendar alarm count changed, this should trigger alarm sync...")
+            
+            if hasChanges {
+                print("📅🔔 Meaningful calendar changes detected, triggering alarm sync...")
+                print("  - Count changed: \(previousCount != calendarAlarmEvents.count)")
+                print("  - Event IDs changed: \(previousEventIds != newEventIds)")
+            } else {
+                print("📅⚪ No meaningful calendar changes detected, skipping alarm sync")
             }
         }
+    }
+    
+    // MARK: - Change Detection
+    
+    private func hasEventContentChanged(previous: [CalendarAlarmEvent], new: [CalendarAlarmEvent]) -> Bool {
+        // Create lookup dictionaries for efficient comparison
+        let previousLookup = Dictionary(uniqueKeysWithValues: previous.map { ($0.originalEventId ?? $0.id, $0) })
+        let newLookup = Dictionary(uniqueKeysWithValues: new.map { ($0.originalEventId ?? $0.id, $0) })
+        
+        // Check if any event times or alarm minutes changed
+        for (eventId, newEvent) in newLookup {
+            if let previousEvent = previousLookup[eventId] {
+                // Compare key properties that affect alarm scheduling
+                if previousEvent.startDate != newEvent.startDate ||
+                   previousEvent.alarmMinutes != newEvent.alarmMinutes ||
+                   previousEvent.title != newEvent.title {
+                    print("📅🔍 Event content changed for: \(newEvent.title)")
+                    return true
+                }
+            }
+        }
+        
+        return false
     }
     
     // MARK: - Alarm Pattern Parsing

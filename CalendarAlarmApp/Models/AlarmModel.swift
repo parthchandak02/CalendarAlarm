@@ -181,10 +181,10 @@ class AlarmStore: ObservableObject {
 
     // MARK: - CRUD Operations
 
-    func addAlarm(_ alarm: AlarmData) {
+        func addAlarm(_ alarm: AlarmData) {
         alarms.append(alarm)
         saveAlarms()
-
+        
         if alarm.isEnabled {
             Task {
                 await scheduleAlarmWithAlarmKit(alarm)
@@ -233,6 +233,8 @@ class AlarmStore: ObservableObject {
             alarms = decoded
         }
     }
+
+
 
     // MARK: - AlarmKit Integration (Following docs pattern exactly)
 
@@ -375,16 +377,41 @@ class AlarmStore: ObservableObject {
             }
         }
         
-        // Add new calendar alarms
+        // Add new calendar alarms or update existing ones
         for calendarEvent in calendarEvents {
             let eventId = calendarEvent.originalEventId
             
             // Check if we already have an alarm for this calendar event
-            let existingAlarm = alarms.first { alarm in
+            if let existingAlarm = alarms.first(where: { alarm in
                 alarm.isFromCalendar && alarm.calendarEventId == eventId
-            }
-            
-            if existingAlarm == nil {
+            }) {
+                // Update existing alarm with new calendar event data
+                let baseAlarm = AlarmData(from: calendarEvent)
+                let updatedAlarm = AlarmData(
+                    id: existingAlarm.id, // Preserve the existing ID
+                    title: baseAlarm.title,
+                    isEnabled: existingAlarm.isEnabled, // Preserve enabled state
+                    alarmDate: baseAlarm.alarmDate,
+                    soundName: baseAlarm.soundName,
+                    snoozeEnabled: baseAlarm.snoozeEnabled,
+                    preAlertMinutes: baseAlarm.preAlertMinutes,
+                    postAlertMinutes: baseAlarm.postAlertMinutes,
+                    isFromCalendar: baseAlarm.isFromCalendar,
+                    calendarEventId: baseAlarm.calendarEventId,
+                    calendarTitle: baseAlarm.calendarTitle
+                )
+                
+                // Check if the alarm time actually changed
+                if existingAlarm.alarmDate != updatedAlarm.alarmDate ||
+                   existingAlarm.title != updatedAlarm.title {
+                    print("📅🔄 Updating calendar alarm: \(existingAlarm.title)")
+                    print("  Old time: \(existingAlarm.alarmDate.formatted())")
+                    print("  New time: \(updatedAlarm.alarmDate.formatted())")
+                    
+                    // Update the alarm (this will cancel and reschedule the individual alarm)
+                    updateAlarm(updatedAlarm)
+                }
+            } else {
                 // Create new alarm from calendar event
                 let newAlarm = AlarmData(from: calendarEvent)
                 addAlarm(newAlarm)

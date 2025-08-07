@@ -88,6 +88,11 @@ struct AddEditAlarmView: View {
             DatePicker("Select alarm time", selection: $alarmDate, in: Date()..., displayedComponents: [.date, .hourAndMinute])
                 .datePickerStyle(.graphical) // Calendar-style with today highlighted
                 .colorScheme(.dark)
+                .accentColor(.red)
+                .background(Color.black)
+                .foregroundColor(.white)
+                .preferredColorScheme(.dark)
+                .environment(\.colorScheme, .dark)
         }
         .padding()
         .background(Color.gray.opacity(0.1))
