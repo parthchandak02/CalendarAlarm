@@ -8,6 +8,7 @@
 import ActivityKit
 import AlarmKit
 import Combine
+import EventKit
 import Foundation
 import SwiftUI
 
@@ -22,6 +23,9 @@ struct AlarmData: Identifiable, Codable {
     var snoozeEnabled: Bool
     var preAlertMinutes: Int // Minutes before final alert (like 10 min warning)
     var postAlertMinutes: Int // Minutes to keep alert active after countdown ends
+    var isFromCalendar: Bool = false // Flag to identify calendar-imported alarms
+    var calendarEventId: String? = nil // Original calendar event ID for tracking
+    var calendarTitle: String? = nil // Name of the source calendar
 
     init(id: UUID = UUID(),
          title: String = "Alarm",
@@ -30,7 +34,10 @@ struct AlarmData: Identifiable, Codable {
          soundName: String = "Chime",
          snoozeEnabled: Bool = true,
          preAlertMinutes: Int = 10, // 10 min warning before alarm
-         postAlertMinutes: Int = 5) { // 5 min alert duration after alarm fires
+         postAlertMinutes: Int = 5, // 5 min alert duration after alarm fires
+         isFromCalendar: Bool = false,
+         calendarEventId: String? = nil,
+         calendarTitle: String? = nil) {
         self.id = id
         self.title = title
         self.isEnabled = isEnabled
@@ -39,6 +46,9 @@ struct AlarmData: Identifiable, Codable {
         self.snoozeEnabled = snoozeEnabled
         self.preAlertMinutes = preAlertMinutes
         self.postAlertMinutes = postAlertMinutes
+        self.isFromCalendar = isFromCalendar
+        self.calendarEventId = calendarEventId
+        self.calendarTitle = calendarTitle
     }
 
     var durationString: String {
@@ -59,6 +69,21 @@ struct AlarmData: Identifiable, Codable {
     // Check if alarm is in the past
     var isPastDue: Bool {
         alarmDate < Date()
+    }
+    
+    // Convenience initializer for calendar events
+    init(from calendarEvent: CalendarAlarmEvent) {
+        self.id = UUID(uuidString: calendarEvent.id) ?? UUID()
+        self.title = calendarEvent.title
+        self.isEnabled = true
+        self.alarmDate = calendarEvent.alarmDate
+        self.soundName = "Chime"
+        self.snoozeEnabled = true
+        self.preAlertMinutes = 2 // Short pre-alert for calendar events
+        self.postAlertMinutes = 5
+        self.isFromCalendar = true
+        self.calendarEventId = calendarEvent.originalEventId
+        self.calendarTitle = calendarEvent.calendarTitle
     }
 }
 
@@ -104,7 +129,7 @@ enum Weekday: Int, CaseIterable, Codable {
 
 // AlarmMetadata implementation following official Apple documentation pattern
 // Using nonisolated to avoid actor isolation issues with Sendable conformance
-nonisolated(unsafe) struct EmptyAlarmMetadata: AlarmMetadata, Sendable, Codable {
+nonisolated struct EmptyAlarmMetadata: AlarmMetadata, Sendable, Codable {
     // Following exact pattern from Apple's CookingData example
     // Simple title property to satisfy AlarmMetadata requirements
     let title: String
@@ -143,12 +168,15 @@ typealias AlarmAppMetadata = EmptyAlarmMetadata
 @MainActor
 class AlarmStore: ObservableObject {
     @Published var alarms: [AlarmData] = []
+    @Published var calendarService = CalendarService()
 
     private let userDefaults = UserDefaults.standard
     private let alarmsKey = "SavedAlarms"
+    private var cancellables = Set<AnyCancellable>()
 
     init() {
         loadAlarms()
+        setupCalendarIntegration()
     }
 
     // MARK: - CRUD Operations
@@ -260,7 +288,7 @@ class AlarmStore: ObservableObject {
             )
 
             // Create alarm attributes with all presentations (countdown-based alarms)
-            let metadata = AlarmAppMetadata() // Empty metadata for iOS 26 beta
+            let metadata = AlarmAppMetadata(title: alarm.title) // Pass actual alarm title
             let attributes = AlarmAttributes<AlarmAppMetadata>(
                 presentation: AlarmPresentation(
                     alert: alertPresentation,
@@ -313,6 +341,69 @@ class AlarmStore: ObservableObject {
         Task {
             try? AlarmManager.shared.cancel(id: alarmId)
         }
+    }
+
+    // MARK: - Calendar Integration
+    
+    private func setupCalendarIntegration() {
+        // Monitor calendar events and automatically sync with alarms
+        calendarService.$calendarEvents
+            .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main)
+            .sink { [weak self] calendarEvents in
+                Task {
+                    await self?.syncCalendarAlarms(calendarEvents)
+                }
+            }
+            .store(in: &cancellables)
+    }
+    
+    func requestCalendarAccess() async {
+        await calendarService.requestCalendarAccess()
+    }
+    
+    private func syncCalendarAlarms(_ calendarEvents: [CalendarAlarmEvent]) async {
+        // Remove outdated calendar alarms
+        let existingCalendarAlarms = alarms.filter { $0.isFromCalendar }
+        let calendarEventIds = Set(calendarEvents.map { $0.originalEventId })
+        
+        for existingAlarm in existingCalendarAlarms {
+            if let eventId = existingAlarm.calendarEventId,
+               !calendarEventIds.contains(eventId) {
+                // Calendar event was deleted or modified, remove the alarm
+                deleteAlarm(existingAlarm)
+                print("🗑️ Removed outdated calendar alarm: \(existingAlarm.title)")
+            }
+        }
+        
+        // Add new calendar alarms
+        for calendarEvent in calendarEvents {
+            let eventId = calendarEvent.originalEventId
+            
+            // Check if we already have an alarm for this calendar event
+            let existingAlarm = alarms.first { alarm in
+                alarm.isFromCalendar && alarm.calendarEventId == eventId
+            }
+            
+            if existingAlarm == nil {
+                // Create new alarm from calendar event
+                let newAlarm = AlarmData(from: calendarEvent)
+                addAlarm(newAlarm)
+                print("📅➕ Added calendar alarm: \(newAlarm.title) - \(newAlarm.durationString)")
+            }
+        }
+    }
+    
+    func refreshCalendarEvents() async {
+        await calendarService.loadCalendarEvents()
+    }
+    
+    // Get calendar vs manual alarms separately
+    var calendarAlarms: [AlarmData] {
+        alarms.filter { $0.isFromCalendar }
+    }
+    
+    var manualAlarms: [AlarmData] {
+        alarms.filter { !$0.isFromCalendar }
     }
 
     // MARK: - Live Activity Management (AlarmKit)

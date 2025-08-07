@@ -6,12 +6,14 @@
 //
 
 import AlarmKit
+import EventKit
 import SwiftUI
 
 struct MainAlarmView: View {
     @StateObject private var alarmStore = AlarmStore()
     @State private var isAddingAlarm = false
     @State private var editingAlarm: AlarmData?
+    @State private var showingCalendarPermissionAlert = false
 
     var body: some View {
         NavigationView {
@@ -21,6 +23,11 @@ struct MainAlarmView: View {
                     .ignoresSafeArea()
 
                 VStack(spacing: 0) {
+                    // Calendar permission banner
+                    if alarmStore.calendarService.authorizationStatus != .fullAccess {
+                        calendarAccessBanner
+                    }
+                    
                     if alarmStore.alarms.isEmpty {
                         emptyStateView
                     } else {
@@ -33,12 +40,30 @@ struct MainAlarmView: View {
             .preferredColorScheme(.dark)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        isAddingAlarm = true
-                    }) {
-                        Image(systemName: "plus")
-                            .font(.title2)
-                            .foregroundColor(.orange)
+                    HStack {
+                        // Calendar sync button
+                        Button(action: {
+                            Task {
+                                if alarmStore.calendarService.authorizationStatus == .fullAccess {
+                                    await alarmStore.refreshCalendarEvents()
+                                } else {
+                                    await alarmStore.requestCalendarAccess()
+                                }
+                            }
+                        }) {
+                            Image(systemName: alarmStore.calendarService.authorizationStatus == .fullAccess ? "calendar.badge.checkmark" : "calendar")
+                                .font(.title2)
+                                .foregroundColor(alarmStore.calendarService.authorizationStatus == .fullAccess ? .green : .orange)
+                        }
+                        
+                        // Add manual alarm button
+                        Button(action: {
+                            isAddingAlarm = true
+                        }) {
+                            Image(systemName: "plus")
+                                .font(.title2)
+                                .foregroundColor(.orange)
+                        }
                     }
                 }
 
@@ -58,6 +83,43 @@ struct MainAlarmView: View {
         }
     }
 
+    // MARK: - Calendar Access Banner
+    
+    private var calendarAccessBanner: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Image(systemName: "calendar.badge.plus")
+                    .font(.title2)
+                    .foregroundColor(.orange)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Calendar Integration")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    
+                    Text("Grant calendar access to automatically create alarms from events with 'alarm#' in notes")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.leading)
+                }
+                
+                Spacer()
+                
+                Button("Grant Access") {
+                    Task {
+                        await alarmStore.requestCalendarAccess()
+                    }
+                }
+                .font(.caption)
+                .foregroundColor(.orange)
+            }
+            .padding()
+            .background(Color.gray.opacity(0.2))
+            .cornerRadius(12)
+            .padding(.horizontal)
+        }
+    }
+
     // MARK: - Empty State View
 
     private var emptyStateView: some View {
@@ -73,9 +135,10 @@ struct MainAlarmView: View {
                 .fontWeight(.medium)
                 .foregroundColor(.white)
 
-            Text("Add an alarm to get started")
+            Text("Add an alarm or grant calendar access to import events")
                 .font(.body)
                 .foregroundColor(.gray)
+                .multilineTextAlignment(.center)
 
             Spacer()
         }
@@ -85,20 +148,69 @@ struct MainAlarmView: View {
 
     private var alarmListView: some View {
         List {
-            ForEach(alarmStore.alarms) { alarm in
-                AlarmRowView(
-                    alarm: alarm,
-                    onToggle: {
-                        alarmStore.toggleAlarm(alarm)
-                    },
-                    onEdit: {
-                        editingAlarm = alarm
+            // Calendar Alarms Section
+            if !alarmStore.calendarAlarms.isEmpty {
+                Section(header: 
+                    HStack {
+                        Image(systemName: "calendar")
+                            .foregroundColor(.green)
+                        Text("Calendar Alarms")
+                            .foregroundColor(.green)
+                        Spacer()
+                        Text("\(alarmStore.calendarAlarms.count)")
+                            .foregroundColor(.gray)
+                            .font(.caption)
                     }
-                )
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+                    .padding(.vertical, 4)
+                ) {
+                    ForEach(alarmStore.calendarAlarms) { alarm in
+                        AlarmRowView(
+                            alarm: alarm,
+                            onToggle: {
+                                alarmStore.toggleAlarm(alarm)
+                            },
+                            onEdit: {
+                                // Calendar alarms should not be editable
+                                // Instead, show info about the source event
+                            }
+                        )
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
+                }
             }
-            .onDelete(perform: deleteAlarms)
+            
+            // Manual Alarms Section
+            if !alarmStore.manualAlarms.isEmpty {
+                Section(header: 
+                    HStack {
+                        Image(systemName: "alarm")
+                            .foregroundColor(.orange)
+                        Text("Manual Alarms")
+                            .foregroundColor(.orange)
+                        Spacer()
+                        Text("\(alarmStore.manualAlarms.count)")
+                            .foregroundColor(.gray)
+                            .font(.caption)
+                    }
+                    .padding(.vertical, 4)
+                ) {
+                    ForEach(alarmStore.manualAlarms) { alarm in
+                        AlarmRowView(
+                            alarm: alarm,
+                            onToggle: {
+                                alarmStore.toggleAlarm(alarm)
+                            },
+                            onEdit: {
+                                editingAlarm = alarm
+                            }
+                        )
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                    }
+                    .onDelete(perform: deleteManualAlarms)
+                }
+            }
         }
         .listStyle(PlainListStyle())
         .scrollContentBackground(.hidden)
@@ -109,6 +221,13 @@ struct MainAlarmView: View {
     private func deleteAlarms(offsets: IndexSet) {
         for index in offsets {
             alarmStore.deleteAlarm(alarmStore.alarms[index])
+        }
+    }
+    
+    private func deleteManualAlarms(offsets: IndexSet) {
+        let manualAlarms = alarmStore.manualAlarms
+        for index in offsets {
+            alarmStore.deleteAlarm(manualAlarms[index])
         }
     }
 }
@@ -131,7 +250,7 @@ struct AlarmRowView: View {
                     .lineLimit(1) // Keep it on one line
                     .scaledToFit() // Scale to fit available space
 
-                // Title and countdown info
+                // Title and source info
                 HStack(spacing: 8) {
                     Text(alarm.title)
                         .font(.body)
@@ -140,9 +259,15 @@ struct AlarmRowView: View {
                     Text("•")
                         .foregroundColor(.gray)
 
-                    Text("Alarm")
-                        .font(.body)
-                        .foregroundColor(.gray)
+                    if alarm.isFromCalendar {
+                        Text("from \(alarm.calendarTitle ?? "Calendar")")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                    } else {
+                        Text("Alarm")
+                            .font(.body)
+                            .foregroundColor(.gray)
+                    }
                 }
             }
             .layoutPriority(1) // Give the text section higher priority

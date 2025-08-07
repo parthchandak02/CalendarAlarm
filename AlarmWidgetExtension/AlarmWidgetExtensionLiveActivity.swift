@@ -6,7 +6,7 @@ import WidgetKit
 // MARK: - AlarmKit Live Activity Implementation (Official WWDC 2025 Pattern)
 
 // AlarmMetadata for our alarm app - must match exactly with main app
-nonisolated(unsafe) struct EmptyAlarmMetadata: AlarmMetadata, Sendable, Codable {
+nonisolated struct EmptyAlarmMetadata: AlarmMetadata, Sendable, Codable {
     let title: String
     
     nonisolated init(title: String = "Alarm") {
@@ -35,10 +35,14 @@ struct AlarmWidgetExtensionLiveActivity: Widget {
                     
                     // Show countdown using official AlarmKit state
                     switch context.state.mode {
-                    case .countdown:
-                        Text("Active")
+                    case .countdown(let countdown):
+                        let fireDate = countdown.startDate.addingTimeInterval(
+                            countdown.totalCountdownDuration - countdown.previouslyElapsedDuration
+                        )
+                        Text(timerInterval: Date()...fireDate, countsDown: true)
                             .font(.caption)
                             .foregroundColor(.red)
+                            .monospacedDigit()
                     case .paused:
                         Text("Paused")
                             .font(.caption)
@@ -76,10 +80,14 @@ struct AlarmWidgetExtensionLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.trailing) {
                     // Show countdown state
                     switch context.state.mode {
-                    case .countdown:
-                        Text("Active")
+                    case .countdown(let countdown):
+                        let fireDate = countdown.startDate.addingTimeInterval(
+                            countdown.totalCountdownDuration - countdown.previouslyElapsedDuration
+                        )
+                        Text(timerInterval: Date()...fireDate, countsDown: true)
                             .font(.caption)
                             .foregroundColor(.red)
+                            .monospacedDigit()
                     case .paused:
                         Text("Paused")
                             .font(.caption)
@@ -102,24 +110,31 @@ struct AlarmWidgetExtensionLiveActivity: Widget {
                     .foregroundColor(.red)
                     
             } compactTrailing: {
-                // Compact trailing - minimal text
+                // Show compact countdown timer in Dynamic Island
                 switch context.state.mode {
-                case .countdown:
-                    Text("⏱")
-                        .font(.caption2)
+                case .countdown(let countdown):
+                    let fireDate = countdown.startDate.addingTimeInterval(
+                        countdown.totalCountdownDuration - countdown.previouslyElapsedDuration
+                    )
+                    Text(timerInterval: Date()...fireDate, countsDown: true)
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
                         .foregroundColor(.red)
+                        .monospacedDigit()
+                        .minimumScaleFactor(0.7)
+                        .lineLimit(1)
+                        .frame(maxWidth: 40)
                 case .paused:
-                    Text("⏸")
+                    Text("Paused")
                         .font(.caption2)
                         .foregroundColor(.orange)
                 case .alert:
-                    Text("🔔")
+                    Text("Alerting")
                         .font(.caption2)
                         .foregroundColor(.red)
                 @unknown default:
-                    Text("?")
+                    Text("Unknown")
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.red)
                 }
                 
             } minimal: {
