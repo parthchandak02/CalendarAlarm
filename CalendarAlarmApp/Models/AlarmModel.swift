@@ -468,14 +468,17 @@ class AlarmStore: ObservableObject, CalendarAlarmSchedulingDelegate {
     // Legacy method that redirects to hierarchical scheduling
     private func scheduleAlarmWithAlarmKit(_ alarm: AlarmData, isBackgroundScheduling: Bool) async {
         if isBackgroundScheduling {
-            // For background scheduling, schedule individually without affecting hierarchy
+            // In background, still promote the earliest upcoming alarm so the system can
+            // render countdown on Lock Screen/Dynamic Island using system presentation
+            // (and Live Activity when allowed).
+            let isEarliestUpcoming = (nextUpcomingAlarm?.id == alarm.id)
             await scheduleIndividualAlarmWithAlarmKit(
-                alarm, 
-                withLiveActivityPriority: false, // Background alarms don't get Live Activity priority initially
+                alarm,
+                withLiveActivityPriority: isEarliestUpcoming,
                 isBackgroundScheduling: true
             )
         } else {
-            // For foreground scheduling, use hierarchical approach
+            // In foreground, keep full hierarchical reschedule
             await rescheduleAllAlarmsHierarchically()
         }
     }
@@ -740,6 +743,9 @@ class AlarmStore: ObservableObject, CalendarAlarmSchedulingDelegate {
         }
         
         print("✅⏰ Background alarm scheduling complete: \(scheduled) new, \(updated) updated, \(skipped) unchanged")
+
+        // Ensure only the earliest enabled alarm has Live Activity priority
+        await enforceLiveActivityHierarchyInBackground()
     }
     
     func cancelAlarmsForDeletedEvents(_ deletedEventIds: [String]) async {
@@ -755,5 +761,31 @@ class AlarmStore: ObservableObject, CalendarAlarmSchedulingDelegate {
         }
         
         print("✅🗑️ Cancelled \(cancelled) alarms for deleted events")
+
+        // Recompute hierarchy after deletions
+        await enforceLiveActivityHierarchyInBackground()
+    }
+
+    // MARK: - Background Hierarchy Enforcement
+
+    private func enforceLiveActivityHierarchyInBackground() async {
+        // Determine current order
+        let sorted = enabledAlarmsSortedByTime
+        guard !sorted.isEmpty else { return }
+
+        print("🧭 Enforcing background Live Activity hierarchy…")
+
+        for (index, alarm) in sorted.enumerated() {
+            let shouldHaveLiveActivity = (index == 0)
+            // Cancel first to avoid duplicated schedules
+            cancelAlarmWithAlarmKit(alarm.id)
+            await scheduleIndividualAlarmWithAlarmKit(
+                alarm,
+                withLiveActivityPriority: shouldHaveLiveActivity,
+                isBackgroundScheduling: true
+            )
+        }
+
+        print("✅ Enforced background hierarchy (earliest has Live Activity)")
     }
 }
