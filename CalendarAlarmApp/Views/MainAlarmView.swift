@@ -10,7 +10,7 @@ import EventKit
 import SwiftUI
 
 struct MainAlarmView: View {
-    @StateObject private var alarmStore = AlarmStore()
+    @EnvironmentObject var alarmStore: AlarmStore
     @State private var isAddingAlarm = false
     @State private var editingAlarm: AlarmData?
     @State private var showingCalendarPermissionAlert = false

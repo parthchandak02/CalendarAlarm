@@ -163,7 +163,8 @@ echo_section "📋 Scanning for iOS 26.0 targets"
 # Device selection based on argument or auto-detection
 if [ "$DEPLOYMENT_TARGET" = "simulator" ] || [ -z "$DEPLOYMENT_TARGET" ]; then
     # Check simulators first (or force simulator with argument 1)
-    SIMULATORS=$(xcrun simctl list devices available | grep "iOS 26.0" | grep "iPhone 16" || echo "")
+    # Look for specific iOS 26.0 devices, prioritize the new iPhone 16 Pro
+    SIMULATORS=$(xcrun simctl list devices available | grep "iOS 26.0" | grep -E "(iPhone 16 Pro|iPhone 16)" || echo "")
     if [ -n "$SIMULATORS" ]; then
         if [ "$DEPLOYMENT_TARGET" = "simulator" ]; then
             log_info "🎯 Forced target: iOS 26.0 Simulators"
@@ -173,8 +174,10 @@ if [ "$DEPLOYMENT_TARGET" = "simulator" ] || [ -z "$DEPLOYMENT_TARGET" ]; then
         echo "$SIMULATORS"
         
         # Auto-select first booted simulator or first available
+        # New device identifier: A2684590-2A44-4E91-A302-1D9CDB5A9472
         DEVICE_ID=$(echo "$SIMULATORS" | grep "(Booted)" | head -n1 | grep -o '[A-F0-9-]\{36\}' || \
-                    echo "$SIMULATORS" | head -n1 | grep -o '[A-F0-9-]\{36\}')
+                    echo "$SIMULATORS" | head -n1 | grep -o '[A-F0-9-]\{36\}' || \
+                    echo "A2684590-2A44-4E91-A302-1D9CDB5A9472")
         DEVICE_TYPE="simulator"
         DESTINATION="platform=iOS Simulator,id=$DEVICE_ID"
         

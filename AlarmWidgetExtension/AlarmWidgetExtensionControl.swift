@@ -10,7 +10,7 @@ import SwiftUI
 import WidgetKit
 
 struct AlarmWidgetExtensionControl: ControlWidget {
-    static let kind: String = "pchandak.CalendarAlarmApp.AlarmWidgetExtension"
+    static let kind: String = "pchandak.CalendarAlarms.AlarmWidgetExtension"
 
     var body: some ControlWidgetConfiguration {
         AppIntentControlConfiguration(

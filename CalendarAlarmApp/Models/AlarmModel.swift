@@ -11,6 +11,7 @@ import Combine
 import EventKit
 import Foundation
 import SwiftUI
+import os.log
 
 // MARK: - Alarm Data Model (Using AlarmKit schedule-based alarms for future dates)
 
@@ -166,17 +167,38 @@ typealias AlarmAppMetadata = EmptyAlarmMetadata
 // MARK: - Alarm Store Manager
 
 @MainActor
-class AlarmStore: ObservableObject {
+class AlarmStore: ObservableObject, CalendarAlarmSchedulingDelegate {
     @Published var alarms: [AlarmData] = []
     @Published var calendarService = CalendarService()
 
     private let userDefaults = UserDefaults.standard
     private let alarmsKey = "SavedAlarms"
     private var cancellables = Set<AnyCancellable>()
+    
+    // Track alarms that were scheduled in background and need Live Activity initialization
+    private let pendingLiveActivitiesKey = "PendingLiveActivities"
+    private var pendingLiveActivities: Set<UUID> {
+        get {
+            let data = userDefaults.data(forKey: pendingLiveActivitiesKey) ?? Data()
+            return (try? JSONDecoder().decode(Set<UUID>.self, from: data)) ?? Set<UUID>()
+        }
+        set {
+            let data = (try? JSONEncoder().encode(newValue)) ?? Data()
+            userDefaults.set(data, forKey: pendingLiveActivitiesKey)
+        }
+    }
 
     init() {
         loadAlarms()
         setupCalendarIntegration()
+        
+        // Set self as the calendar service delegate
+        calendarService.alarmSchedulingDelegate = self
+        
+        // Process any alarms that were scheduled in background and need Live Activity initialization
+        Task {
+            await processPendingLiveActivities()
+        }
     }
 
     // MARK: - CRUD Operations
@@ -198,10 +220,8 @@ class AlarmStore: ObservableObject {
             saveAlarms()
 
             Task {
-                cancelAlarmWithAlarmKit(alarm.id)
-                if alarm.isEnabled {
-                    await scheduleAlarmWithAlarmKit(alarm)
-                }
+                // Use hierarchical scheduling to maintain proper Live Activity priority
+                await rescheduleAllAlarmsHierarchically()
             }
         }
     }
@@ -210,13 +230,23 @@ class AlarmStore: ObservableObject {
         alarms.removeAll { $0.id == alarm.id }
         saveAlarms()
 
-        cancelAlarmWithAlarmKit(alarm.id)
+        Task {
+            // Use hierarchical scheduling to update priorities after deletion
+            await rescheduleAllAlarmsHierarchically()
+        }
     }
 
     func toggleAlarm(_ alarm: AlarmData) {
         var updatedAlarm = alarm
-        updatedAlarm.isEnabled.toggle()
-        updateAlarm(updatedAlarm)
+        let newState = !updatedAlarm.isEnabled
+        updatedAlarm.isEnabled = newState
+        
+        // Log the toggle action
+        os_log("🔄 ALARM TOGGLE: '%{public}@' from %{public}@ to %{public}@", log: OSLog.default, type: .default, alarm.title, alarm.isEnabled ? "ON" : "OFF", newState ? "ON" : "OFF")
+        print("🔄 ALARM TOGGLE: '\(alarm.title)' from \(alarm.isEnabled ? "ON" : "OFF") to \(newState ? "ON" : "OFF")")
+        NSLog("🔄 ALARM TOGGLE: '%@' from %@ to %@", alarm.title, alarm.isEnabled ? "ON" : "OFF", newState ? "ON" : "OFF")
+        
+        updateAlarm(updatedAlarm) // This will trigger hierarchical rescheduling
     }
 
     // MARK: - Persistence
@@ -237,8 +267,90 @@ class AlarmStore: ObservableObject {
 
 
     // MARK: - AlarmKit Integration (Following docs pattern exactly)
-
+    
+    // MARK: - Hierarchical Alarm Scheduling
+    
+    /// Reschedule all alarms with proper hierarchical Live Activity priority
+    /// Only the earliest upcoming alarm gets Live Activity countdown display
+    private func rescheduleAllAlarmsHierarchically() async {
+        // Multiple logging methods to ensure visibility in Xcode console
+        os_log("🔄 HIERARCHICAL SCHEDULING: Starting reschedule of all alarms", log: OSLog.default, type: .default)
+        print("🔄 HIERARCHICAL SCHEDULING: Starting reschedule of all alarms")
+        NSLog("🔄 HIERARCHICAL SCHEDULING: Starting reschedule of all alarms")
+        
+        // Log current alarm state
+        os_log("📋 CURRENT STATE: Total alarms: %d, Enabled: %d", log: OSLog.default, type: .default, alarms.count, alarms.filter(\.isEnabled).count)
+        print("📋 CURRENT STATE: Total alarms: \(alarms.count), Enabled: \(alarms.filter(\.isEnabled).count)")
+        NSLog("📋 CURRENT STATE: Total alarms: %d, Enabled: %d", alarms.count, alarms.filter(\.isEnabled).count)
+        
+        // Cancel all existing AlarmKit alarms first
+        for alarm in alarms where alarm.isEnabled {
+            os_log("❌ CANCEL: Canceling existing alarm: %{public}@ at %{public}@", log: OSLog.default, type: .default, alarm.title, alarm.alarmDate.description)
+            print("❌ CANCEL: Canceling existing alarm: '\(alarm.title)' at \(alarm.alarmDate)")
+            NSLog("❌ CANCEL: Canceling existing alarm: '%@' at %@", alarm.title, alarm.alarmDate.description)
+            cancelAlarmWithAlarmKit(alarm.id)
+        }
+        
+        // Get earliest upcoming alarm (this gets Live Activity priority)
+        let sortedAlarms = enabledAlarmsSortedByTime
+        guard !sortedAlarms.isEmpty else {
+            os_log("⚠️ WARNING: No enabled alarms to schedule", log: OSLog.default, type: .default)
+            print("⚠️ WARNING: No enabled alarms to schedule")
+            NSLog("⚠️ WARNING: No enabled alarms to schedule")
+            return
+        }
+        
+        os_log("📊 ALARM HIERARCHY: Scheduling %d alarms in priority order:", log: OSLog.default, type: .default, sortedAlarms.count)
+        print("📊 ALARM HIERARCHY: Scheduling \(sortedAlarms.count) alarms in priority order:")
+        NSLog("📊 ALARM HIERARCHY: Scheduling %d alarms in priority order:", sortedAlarms.count)
+        
+        // Log the hierarchy order
+        for (index, alarm) in sortedAlarms.enumerated() {
+            let priorityText = index == 0 ? "🥇 PRIORITY (Live Activity)" : "🥈 Background Only"
+            os_log("  %d. %{public}@ at %{public}@ - %{public}@", log: OSLog.default, type: .default, index + 1, alarm.title, alarm.alarmDate.description, priorityText)
+            print("  \(index + 1). '\(alarm.title)' at \(alarm.alarmDate) - \(priorityText)")
+            NSLog("  %d. '%@' at %@ - %@", index + 1, alarm.title, alarm.alarmDate.description, priorityText)
+        }
+        
+        for (index, alarm) in sortedAlarms.enumerated() {
+            let isEarliestAlarm = (index == 0)
+            
+            os_log("⏰ SCHEDULING: Processing alarm %d/%d: '%{public}@' - Live Activity: %{public}@", log: OSLog.default, type: .default, index + 1, sortedAlarms.count, alarm.title, isEarliestAlarm ? "YES" : "NO")
+            print("⏰ SCHEDULING: Processing alarm \(index + 1)/\(sortedAlarms.count): '\(alarm.title)' - Live Activity: \(isEarliestAlarm ? "YES" : "NO")")
+            NSLog("⏰ SCHEDULING: Processing alarm %d/%d: '%@' - Live Activity: %@", index + 1, sortedAlarms.count, alarm.title, isEarliestAlarm ? "YES" : "NO")
+            
+            await scheduleIndividualAlarmWithAlarmKit(
+                alarm, 
+                withLiveActivityPriority: isEarliestAlarm,
+                isBackgroundScheduling: false
+            )
+        }
+        
+        os_log("✅ HIERARCHICAL COMPLETE: All alarms scheduled with proper priority", log: OSLog.default, type: .default)
+        print("✅ HIERARCHICAL COMPLETE: All alarms scheduled with proper priority")
+        NSLog("✅ HIERARCHICAL COMPLETE: All alarms scheduled with proper priority")
+    }
+    
     private func scheduleAlarmWithAlarmKit(_ alarm: AlarmData) async {
+        // Always use hierarchical scheduling to maintain proper priority
+        await rescheduleAllAlarmsHierarchically()
+    }
+
+    /// Schedule individual alarm with optional Live Activity priority
+    private func scheduleIndividualAlarmWithAlarmKit(
+        _ alarm: AlarmData, 
+        withLiveActivityPriority hasLiveActivityPriority: Bool,
+        isBackgroundScheduling: Bool
+    ) async {
+        // Log the scheduling attempt
+        os_log("🎯 INDIVIDUAL SCHEDULE: Starting to schedule '%{public}@'", log: OSLog.default, type: .default, alarm.title)
+        os_log("   📍 Live Activity Priority: %{public}@", log: OSLog.default, type: .default, hasLiveActivityPriority ? "YES" : "NO")
+        os_log("   🕰️ Alarm Date: %{public}@", log: OSLog.default, type: .default, alarm.alarmDate.description)
+        print("🎯 INDIVIDUAL SCHEDULE: Starting to schedule '\(alarm.title)'")
+        print("   📍 Live Activity Priority: \(hasLiveActivityPriority ? "YES" : "NO")")
+        print("   🕰️ Alarm Date: \(alarm.alarmDate)")
+        NSLog("🎯 INDIVIDUAL SCHEDULE: Starting to schedule '%@' with Live Activity: %@", alarm.title, hasLiveActivityPriority ? "YES" : "NO")
+        
         do {
             // For iOS 26 beta, use metadata type parameter
             typealias AlarmConfiguration = AlarmManager.AlarmConfiguration<AlarmAppMetadata>
@@ -289,14 +401,29 @@ class AlarmStore: ObservableObject {
                 resumeButton: resumeButton
             )
 
-            // Create alarm attributes with all presentations (countdown-based alarms)
+            // Create alarm attributes - conditionally include countdown/paused presentations based on priority
             let metadata = AlarmAppMetadata(title: alarm.title) // Pass actual alarm title
-            let attributes = AlarmAttributes<AlarmAppMetadata>(
-                presentation: AlarmPresentation(
+            
+            let presentation: AlarmPresentation
+            if hasLiveActivityPriority {
+                // PRIMARY alarm gets full Live Activity countdown experience
+                presentation = AlarmPresentation(
                     alert: alertPresentation,
                     countdown: countdownPresentation,
                     paused: pausedPresentation
-                ),
+                )
+                print("  🎯 PRIMARY: Full Live Activity presentations enabled")
+            } else {
+                // SECONDARY alarms only get alert presentation (no Live Activity)
+                presentation = AlarmPresentation(
+                    alert: alertPresentation
+                    // No countdown/paused = No Live Activity
+                )
+                print("  📱 SECONDARY: Alert-only (no Live Activity)")
+            }
+            
+            let attributes = AlarmAttributes<AlarmAppMetadata>(
+                presentation: presentation,
                 metadata: metadata,
                 tintColor: Color.red
             )
@@ -321,11 +448,35 @@ class AlarmStore: ObservableObject {
 
             _ = try await AlarmManager.shared.schedule(id: alarm.id, configuration: alarmConfiguration)
 
-            print("✅ Scheduled AlarmKit countdown alarm: '\(alarm.title)' - \(alarm.durationString)")
-            print("🎯 Countdown alarm will fire in: \(countdownSeconds) seconds at \(alarm.alarmDate.formatted())")
+            print("✅ Scheduled AlarmKit alarm: '\(alarm.title)' - \(alarm.durationString)")
+            print("🎯 Alarm will fire in: \(countdownSeconds) seconds at \(alarm.alarmDate.formatted())")
+            print("  📺 Live Activity: \(hasLiveActivityPriority ? "ENABLED" : "DISABLED")")
+            
+            // If scheduled in background, mark for Live Activity initialization when app comes to foreground
+            if isBackgroundScheduling && hasLiveActivityPriority {
+                var pending = pendingLiveActivities
+                pending.insert(alarm.id)
+                pendingLiveActivities = pending
+                print("📱 Marked alarm for Live Activity initialization when app comes to foreground")
+            }
 
         } catch {
             print("❌ Failed to schedule AlarmKit alarm: \(error)")
+        }
+    }
+    
+    // Legacy method that redirects to hierarchical scheduling
+    private func scheduleAlarmWithAlarmKit(_ alarm: AlarmData, isBackgroundScheduling: Bool) async {
+        if isBackgroundScheduling {
+            // For background scheduling, schedule individually without affecting hierarchy
+            await scheduleIndividualAlarmWithAlarmKit(
+                alarm, 
+                withLiveActivityPriority: false, // Background alarms don't get Live Activity priority initially
+                isBackgroundScheduling: true
+            )
+        } else {
+            // For foreground scheduling, use hierarchical approach
+            await rescheduleAllAlarmsHierarchically()
         }
     }
 
@@ -424,17 +575,185 @@ class AlarmStore: ObservableObject {
         await calendarService.loadCalendarEvents()
     }
     
-    // Get calendar vs manual alarms separately
+    // MARK: - Force Refresh for External Changes
+    
+    func forceRefreshCalendarData() async {
+        print("🔄 Force refreshing calendar data to detect external changes...")
+        
+        // Save current state for comparison
+        let previousCalendarAlarms = calendarAlarms
+        let previousCount = previousCalendarAlarms.count
+        
+        // Force reload calendar events from system
+        await calendarService.loadCalendarEvents()
+        
+        // Check if any calendar alarms have changed
+        let newCalendarAlarms = calendarAlarms
+        let newCount = newCalendarAlarms.count
+        
+        // Compare event details to detect changes
+        var hasChanges = (previousCount != newCount)
+        
+        if !hasChanges {
+            // Check if any individual alarm details changed (time, title, etc.)
+            for newAlarm in newCalendarAlarms {
+                if let previousAlarm = previousCalendarAlarms.first(where: { $0.calendarEventId == newAlarm.calendarEventId }) {
+                    if previousAlarm.alarmDate != newAlarm.alarmDate ||
+                       previousAlarm.title != newAlarm.title {
+                        hasChanges = true
+                        print("📅🔄 Detected change in calendar alarm: \(newAlarm.title)")
+                        print("  Previous: \(previousAlarm.alarmDate.formatted())")
+                        print("  New: \(newAlarm.alarmDate.formatted())")
+                        break
+                    }
+                } else {
+                    hasChanges = true
+                    print("📅➕ Detected new calendar alarm: \(newAlarm.title)")
+                    break
+                }
+            }
+        }
+        
+        if hasChanges {
+            print("✅ Calendar changes detected - refreshing alarms and Live Activities")
+            
+            // Process any pending Live Activities that might have been affected
+            await processPendingLiveActivities()
+        } else {
+            print("📅 No calendar changes detected")
+        }
+    }
+    
+    // Get calendar vs manual alarms separately, sorted by earliest first
     var calendarAlarms: [AlarmData] {
-        alarms.filter { $0.isFromCalendar }
+        alarms.filter { $0.isFromCalendar }.sorted { $0.alarmDate < $1.alarmDate }
     }
     
     var manualAlarms: [AlarmData] {
-        alarms.filter { !$0.isFromCalendar }
+        alarms.filter { !$0.isFromCalendar }.sorted { $0.alarmDate < $1.alarmDate }
+    }
+    
+    // Get all enabled alarms sorted by time (earliest first)
+    var enabledAlarmsSortedByTime: [AlarmData] {
+        alarms.filter { $0.isEnabled }.sorted { $0.alarmDate < $1.alarmDate }
+    }
+    
+    // Get the next upcoming alarm (earliest enabled alarm)
+    var nextUpcomingAlarm: AlarmData? {
+        enabledAlarmsSortedByTime.first
     }
 
     // MARK: - Live Activity Management (AlarmKit)
 
     // AlarmKit in iOS 26 handles Live Activities automatically when scheduling alarms
     // Manual ActivityKit integration removed to prevent conflicts with system Live Activities
+    
+    // MARK: - Live Activity Management
+    
+    func processPendingLiveActivitiesOnForeground() async {
+        await processPendingLiveActivities()
+    }
+    
+    private func processPendingLiveActivities() async {
+        let pending = pendingLiveActivities
+        guard !pending.isEmpty else {
+            print("📱 No pending Live Activities to process")
+            return
+        }
+        
+        print("📱 Processing \(pending.count) pending Live Activities...")
+        
+        for alarmId in pending {
+            if let alarm = alarms.first(where: { $0.id == alarmId && $0.isEnabled }) {
+                print("📱 Re-scheduling alarm with Live Activity: \(alarm.title)")
+                
+                // Cancel and re-schedule to trigger Live Activity in foreground context
+                cancelAlarmWithAlarmKit(alarm.id)
+                await scheduleAlarmWithAlarmKit(alarm, isBackgroundScheduling: false)
+                
+                // Remove from pending list
+                var pendingSet = pendingLiveActivities
+                pendingSet.remove(alarmId)
+                pendingLiveActivities = pendingSet
+            }
+        }
+        
+        print("✅ Finished processing pending Live Activities")
+    }
+    
+    // MARK: - CalendarAlarmSchedulingDelegate
+    
+    func scheduleAlarmsForCalendarEvents(_ events: [CalendarAlarmEvent]) async {
+        print("🔄⏰ Background scheduling alarms for \(events.count) calendar events...")
+        
+        var scheduled = 0
+        var updated = 0
+        var skipped = 0
+        
+        for calendarEvent in events {
+            // Check if we already have an alarm for this calendar event
+            if let existingAlarm = alarms.first(where: { $0.calendarEventId == calendarEvent.originalEventId }) {
+                // Update existing alarm if needed
+                let updatedAlarm = AlarmData(
+                    id: existingAlarm.id,
+                    title: calendarEvent.title,
+                    isEnabled: existingAlarm.isEnabled,
+                    alarmDate: calendarEvent.alarmDate,
+                    soundName: existingAlarm.soundName,
+                    snoozeEnabled: existingAlarm.snoozeEnabled,
+                    preAlertMinutes: existingAlarm.preAlertMinutes,
+                    postAlertMinutes: existingAlarm.postAlertMinutes,
+                    isFromCalendar: true,
+                    calendarEventId: calendarEvent.originalEventId,
+                    calendarTitle: calendarEvent.calendarTitle
+                )
+                
+                if existingAlarm.alarmDate != updatedAlarm.alarmDate || existingAlarm.title != updatedAlarm.title {
+                    // Update alarm data without triggering normal UI-based scheduling
+                    if let index = alarms.firstIndex(where: { $0.id == updatedAlarm.id }) {
+                        alarms[index] = updatedAlarm
+                        saveAlarms()
+                        
+                        // Cancel and reschedule with background mode
+                        cancelAlarmWithAlarmKit(updatedAlarm.id)
+                        if updatedAlarm.isEnabled {
+                            await scheduleAlarmWithAlarmKit(updatedAlarm, isBackgroundScheduling: true)
+                        }
+                    }
+                    updated += 1
+                    print("📅🔄 Updated alarm: \(updatedAlarm.title)")
+                } else {
+                    skipped += 1
+                }
+            } else {
+                // Create new alarm with background scheduling
+                let newAlarm = AlarmData(from: calendarEvent)
+                alarms.append(newAlarm)
+                saveAlarms()
+                
+                if newAlarm.isEnabled {
+                    await scheduleAlarmWithAlarmKit(newAlarm, isBackgroundScheduling: true)
+                }
+                scheduled += 1
+                print("📅➕ Scheduled new alarm: \(newAlarm.title)")
+            }
+        }
+        
+        print("✅⏰ Background alarm scheduling complete: \(scheduled) new, \(updated) updated, \(skipped) unchanged")
+    }
+    
+    func cancelAlarmsForDeletedEvents(_ deletedEventIds: [String]) async {
+        print("🗑️⏰ Canceling alarms for \(deletedEventIds.count) deleted events...")
+        
+        var cancelled = 0
+        for eventId in deletedEventIds {
+            if let alarm = alarms.first(where: { $0.calendarEventId == eventId }) {
+                deleteAlarm(alarm)
+                cancelled += 1
+                print("🗑️ Cancelled alarm for deleted event: \(alarm.title)")
+            }
+        }
+        
+        print("✅🗑️ Cancelled \(cancelled) alarms for deleted events")
+    }
 }

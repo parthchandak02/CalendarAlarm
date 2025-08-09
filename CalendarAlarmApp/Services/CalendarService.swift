@@ -8,6 +8,16 @@
 import EventKit
 import Foundation
 import Combine
+import BackgroundTasks
+import UIKit
+import UserNotifications
+
+// MARK: - Calendar Alarm Scheduling Delegate
+
+protocol CalendarAlarmSchedulingDelegate: AnyObject {
+    func scheduleAlarmsForCalendarEvents(_ events: [CalendarAlarmEvent]) async
+    func cancelAlarmsForDeletedEvents(_ deletedEventIds: [String]) async
+}
 
 // MARK: - Calendar Service
 
@@ -20,6 +30,17 @@ class CalendarService: ObservableObject {
     private let eventStore = EKEventStore()
     private var cancellables = Set<AnyCancellable>()
     
+    // Background task identifiers
+    static let calendarRefreshTaskID = "pchandak.CalendarAlarmApp.calendarRefresh"
+    static let alarmSchedulingTaskID = "pchandak.CalendarAlarmApp.alarmScheduling"
+    static let liveActivityTriggerTaskID = "pchandak.CalendarAlarmApp.liveActivityTrigger"
+    
+    // Delegate for alarm scheduling
+    weak var alarmSchedulingDelegate: CalendarAlarmSchedulingDelegate?
+    
+    // Notification service for automatic triggering
+    private let notificationService = CalendarNotificationService()
+    
     // Regex pattern to match alarm text like "alarm2", "alarm15", etc.
     private let alarmPattern: NSRegularExpression = {
         do {
@@ -30,6 +51,7 @@ class CalendarService: ObservableObject {
     }()
     
     init() {
+        setupBackgroundTasks()
         setupCalendarChangeMonitoring()
         checkAuthorizationStatus()
         // Load events initially if we already have authorization
@@ -68,6 +90,127 @@ class CalendarService: ObservableObject {
             await MainActor.run {
                 authorizationStatus = .denied
             }
+        }
+    }
+    
+    // MARK: - Background Processing
+    
+    private func setupBackgroundTasks() {
+        print("🔧 Setting up background task handlers...")
+        
+        // Register background refresh task handler
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: Self.calendarRefreshTaskID,
+            using: nil
+        ) { [weak self] task in
+            self?.handleCalendarRefreshTask(task as! BGAppRefreshTask)
+        }
+        
+        // Register alarm scheduling task handler  
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: Self.alarmSchedulingTaskID,
+            using: nil
+        ) { [weak self] task in
+            self?.handleAlarmSchedulingTask(task as! BGProcessingTask)
+        }
+        
+        print("✅ Background task handlers setup complete")
+    }
+    
+    private func handleCalendarRefreshTask(_ task: BGAppRefreshTask) {
+        print("🔄📅 Background calendar refresh task started")
+        
+        // Schedule the next background refresh
+        scheduleBackgroundRefresh()
+        
+        task.expirationHandler = {
+            print("⚠️📅 Background calendar refresh task expired")
+            task.setTaskCompleted(success: false)
+        }
+        
+        Task {
+            await self.performBackgroundCalendarRefresh(task: task)
+        }
+    }
+    
+    private func handleAlarmSchedulingTask(_ task: BGProcessingTask) {
+        print("🔄⏰ Background alarm scheduling task started")
+        
+        task.expirationHandler = {
+            print("⚠️⏰ Background alarm scheduling task expired")
+            task.setTaskCompleted(success: false)
+        }
+        
+        Task {
+            await self.performBackgroundAlarmScheduling(task: task)
+        }
+    }
+    
+    @MainActor
+    private func performBackgroundCalendarRefresh(task: BGAppRefreshTask) async {
+        print("📅🔄 Performing background calendar refresh...")
+        
+        guard authorizationStatus == .fullAccess else {
+            print("❌ Calendar access not granted for background refresh")
+            task.setTaskCompleted(success: false)
+            return
+        }
+        
+        let previousEvents = calendarEvents
+        await loadCalendarEvents()
+        
+        // Check if events changed and need alarm scheduling
+        let hasChanges = hasEventContentChanged(previous: previousEvents, new: calendarEvents)
+        
+        if hasChanges {
+            print("📅🔔 Calendar changes detected in background, scheduling alarm processing...")
+            scheduleAlarmProcessingTask()
+        }
+        
+        print("✅📅 Background calendar refresh completed")
+        task.setTaskCompleted(success: true)
+    }
+    
+    @MainActor
+    private func performBackgroundAlarmScheduling(task: BGProcessingTask) async {
+        print("⏰🔄 Performing background alarm scheduling...")
+        
+        guard let delegate = alarmSchedulingDelegate else {
+            print("❌ No alarm scheduling delegate available")
+            task.setTaskCompleted(success: false)
+            return
+        }
+        
+        // Schedule alarms for all current calendar events
+        await delegate.scheduleAlarmsForCalendarEvents(calendarEvents)
+        
+        print("✅⏰ Background alarm scheduling completed")
+        task.setTaskCompleted(success: true)
+    }
+    
+    func scheduleBackgroundRefresh() {
+        let request = BGAppRefreshTaskRequest(identifier: Self.calendarRefreshTaskID)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60) // 15 minutes from now
+        
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            print("✅📅 Background calendar refresh scheduled")
+        } catch {
+            print("❌ Failed to schedule background calendar refresh: \(error)")
+        }
+    }
+    
+    func scheduleAlarmProcessingTask() {
+        let request = BGProcessingTaskRequest(identifier: Self.alarmSchedulingTaskID)
+        request.requiresNetworkConnectivity = false
+        request.requiresExternalPower = false
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 30) // 30 seconds from now
+        
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            print("✅⏰ Background alarm processing task scheduled")
+        } catch {
+            print("❌ Failed to schedule background alarm processing: \(error)")
         }
     }
     
@@ -189,6 +332,28 @@ class CalendarService: ObservableObject {
                 print("📅🔔 Meaningful calendar changes detected, triggering alarm sync...")
                 print("  - Count changed: \(previousCount != calendarAlarmEvents.count)")
                 print("  - Event IDs changed: \(previousEventIds != newEventIds)")
+                
+                // Send automatic notification trigger for Live Activity initialization
+                Task {
+                    await self.notificationService.sendCalendarUpdateNotification(
+                        eventCount: calendarAlarmEvents.count,
+                        isBackgroundUpdate: true
+                    )
+                }
+                
+                // Trigger alarm scheduling for updated events
+                Task {
+                    await self.alarmSchedulingDelegate?.scheduleAlarmsForCalendarEvents(self.calendarEvents)
+                    
+                    // Cancel alarms for deleted events
+                    let deletedEventIds = previousEventIds.subtracting(newEventIds)
+                    if !deletedEventIds.isEmpty {
+                        await self.alarmSchedulingDelegate?.cancelAlarmsForDeletedEvents(Array(deletedEventIds))
+                    }
+                }
+                
+                // Schedule background processing for future updates
+                self.scheduleBackgroundRefresh()
             } else {
                 print("📅⚪ No meaningful calendar changes detected, skipping alarm sync")
             }
@@ -266,6 +431,109 @@ class CalendarService: ObservableObject {
     func getEventsByDateRange(start: Date, end: Date) -> [CalendarAlarmEvent] {
         return calendarEvents.filter { event in
             event.alarmDate >= start && event.alarmDate <= end
+        }
+    }
+}
+
+// MARK: - Calendar Notification Service
+
+@MainActor
+class CalendarNotificationService: ObservableObject {
+    
+    init() {
+        requestNotificationPermissions()
+    }
+    
+    private func requestNotificationPermissions() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            if granted {
+                print("📱 Notification permissions granted for automatic triggering")
+            } else {
+                print("⚠️ Notification permissions denied - automatic triggering will be limited")
+            }
+        }
+    }
+    
+    func sendCalendarUpdateNotification(eventCount: Int, isBackgroundUpdate: Bool) async {
+        let content = UNMutableNotificationContent()
+        content.title = "📅 Calendar Updated"
+        content.body = "Found \(eventCount) upcoming events. Live Activities refreshed automatically."
+        content.sound = .none // Silent notification
+        content.badge = NSNumber(value: eventCount)
+        
+        // Add action to trigger app opening
+        let openAction = UNNotificationAction(
+            identifier: "REFRESH_LIVE_ACTIVITIES",
+            title: "Refresh Live Activities",
+            options: [.foreground] // This brings app to foreground
+        )
+        
+        let category = UNNotificationCategory(
+            identifier: "CALENDAR_UPDATE",
+            actions: [openAction],
+            intentIdentifiers: [],
+            options: [.hiddenPreviewsShowTitle]
+        )
+        
+        UNUserNotificationCenter.current().setNotificationCategories([category])
+        content.categoryIdentifier = "CALENDAR_UPDATE"
+        
+        // Add custom data for processing
+        content.userInfo = [
+            "action": "refresh_live_activities",
+            "eventCount": eventCount,
+            "isBackgroundUpdate": isBackgroundUpdate,
+            "timestamp": Date().timeIntervalSince1970
+        ]
+        
+        // Schedule immediate delivery
+        let request = UNNotificationRequest(
+            identifier: "calendar_update_\(Date().timeIntervalSince1970)",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
+        )
+        
+        do {
+            try await UNUserNotificationCenter.current().add(request)
+            print("📱 Sent automatic calendar update notification")
+            
+            // Also schedule a background task to trigger Live Activity refresh
+            await scheduleAutomaticLiveActivityRefresh()
+            
+        } catch {
+            print("❌ Failed to send calendar update notification: \(error)")
+        }
+    }
+    
+    private func scheduleAutomaticLiveActivityRefresh() async {
+        // Schedule a BGContinuedProcessingTask for iOS 26
+        let request = BGAppRefreshTaskRequest(identifier: CalendarService.liveActivityTriggerTaskID)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 5) // 5 seconds from now
+        
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            print("📱 Scheduled automatic Live Activity refresh task")
+        } catch {
+            print("❌ Failed to schedule Live Activity refresh task: \(error)")
+        }
+    }
+    
+    func handleNotificationResponse(_ response: UNNotificationResponse) async {
+        guard response.notification.request.content.categoryIdentifier == "CALENDAR_UPDATE" else {
+            return
+        }
+        
+        switch response.actionIdentifier {
+        case "REFRESH_LIVE_ACTIVITIES":
+            print("📱 User triggered Live Activity refresh from notification")
+            // This will be handled by the app delegate when it brings app to foreground
+            
+        case UNNotificationDefaultActionIdentifier:
+            print("📱 User tapped notification - app will come to foreground")
+            // App automatically processes pending Live Activities when coming to foreground
+            
+        default:
+            break
         }
     }
 }

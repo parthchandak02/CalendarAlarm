@@ -219,9 +219,8 @@ struct AddEditAlarmView: View {
         )
 
         if let editingAlarm {
-            var updatedAlarm = alarm
-            // Preserve the existing enabled state and ID
-            updatedAlarm = AlarmData(
+            let updatedAlarm = AlarmData(
+                id: editingAlarm.id,
                 title: title.isEmpty ? "Title" : title,
                 isEnabled: editingAlarm.isEnabled,
                 alarmDate: validAlarmDate,
